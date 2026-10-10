@@ -1,0 +1,17 @@
+# ============================================================
+# AgentTrafficCop — Python dependencies
+# Install:  pip install -r requirements.txt
+# ============================================================
+
+# --- Web framework ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+
+# --- Data validation ---
+# Must be >= 2.13 for Python 3.14 prebuilt wheels.
+# See: pydantic-core >= 2.46 ships cp314 wheels.
+pydantic>=2.13.0,<3.0.0
+
+# --- Environment variable loading ---
+python-dotenv==1.0.1
