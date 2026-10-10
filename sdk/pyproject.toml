@@ -2,6 +2,7 @@
 # AgentTrafficCop SDK — packaging config
 #
 # Install for development:    pip install -e ./sdk
+# Install with LangGraph:     pip install -e "./sdk[langgraph]"
 # Install for use:            pip install ./sdk
 # Build a wheel:              python -m build ./sdk
 # ============================================================
@@ -28,6 +29,7 @@ keywords = [
     "governance",
     "orchestration",
     "circuit-breaker",
+    "langgraph",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -48,6 +50,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+langgraph = [
+    "langgraph>=1.2.0,<2.0.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
