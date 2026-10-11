@@ -1,20 +1,17 @@
 """Pluggable session storage backends for AgentTrafficCop.
 
-Defines an abstract `SessionBackend` interface and an in-memory
-implementation. A Redis-backed implementation lands in a later batch
-and satisfies the same interface — the rest of the application does
-not know or care which backend is active.
+Two backends ship:
+  * InMemoryBackend — default; process-local; lost on restart.
+  * RedisBackend    — shared; survives restarts; scales horizontally.
 
-Design rules:
-  * Backends exchange primitives (str/int/float/list), never custom
-    objects. This keeps a future Redis implementation trivial to write.
-  * All public methods are safe to call from any thread.
-  * Backends are stateless with respect to configuration — settings
-    are injected at construction time.
+Both implement `SessionBackend`. The rest of the application does not
+know or care which is active.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -23,6 +20,8 @@ from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
 from .config import settings
+
+logger = logging.getLogger("agenttrafficcop.state.backends")
 
 
 # ---------------------------------------------------------------------------
@@ -88,33 +87,23 @@ class SessionSnapshot:
 
 
 class SessionBackend(ABC):
-    """Abstract session storage backend.
-
-    Implementations must be safe for concurrent use.
-    """
+    """Abstract session storage backend. Implementations must be safe
+    for concurrent use."""
 
     @abstractmethod
-    def get_or_create(self, session_id: str) -> SessionSnapshot:
-        """Return the current state, creating it if it doesn't exist."""
+    def get_or_create(self, session_id: str) -> SessionSnapshot: ...
 
     @abstractmethod
-    def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:
-        """Increment the step count, append the hash, return the new state.
-
-        Must be atomic with respect to other calls for the same session.
-        """
+    def record(self, session_id: str, payload_hash: str) -> SessionSnapshot: ...
 
     @abstractmethod
-    def reset(self, session_id: str) -> bool:
-        """Delete a session. Returns True if it existed."""
+    def reset(self, session_id: str) -> bool: ...
 
     @abstractmethod
-    def active_count(self) -> int:
-        """Number of sessions currently retained."""
+    def active_count(self) -> int: ...
 
     @abstractmethod
-    def uptime_seconds(self) -> float:
-        """Seconds since the backend was created."""
+    def uptime_seconds(self) -> float: ...
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +113,6 @@ class SessionBackend(ABC):
 
 @dataclass
 class _SessionRecord:
-    """Internal mutable record — not exposed outside this module."""
-
     session_id: str
     step: int = 0
     hashes: Deque[str] = field(
@@ -147,8 +134,8 @@ class _SessionRecord:
 class InMemoryBackend(SessionBackend):
     """Thread-safe, LRU-capped, in-memory backend.
 
-    This is the default backend. Sessions live in this process only —
-    they do not survive a restart and are not shared across replicas.
+    Sessions live in this process only — they do not survive a restart
+    and are not shared across replicas.
     """
 
     def __init__(self, max_sessions: Optional[int] = None) -> None:
@@ -156,8 +143,6 @@ class InMemoryBackend(SessionBackend):
         self._sessions: "OrderedDict[str, _SessionRecord]" = OrderedDict()
         self._max_sessions = max_sessions or settings.max_sessions
         self._started_at = time.time()
-
-    # --- Interface implementation -----------------------------------------
 
     def get_or_create(self, session_id: str) -> SessionSnapshot:
         with self._lock:
@@ -196,8 +181,179 @@ class InMemoryBackend(SessionBackend):
     def uptime_seconds(self) -> float:
         return time.time() - self._started_at
 
-    # --- Internals ---------------------------------------------------------
-
     def _evict_if_needed(self) -> None:
         while len(self._sessions) > self._max_sessions:
             self._sessions.popitem(last=False)
+
+
+# ---------------------------------------------------------------------------
+# Redis implementation
+# ---------------------------------------------------------------------------
+
+
+# Per-session record schema inside Redis:
+#
+#   <prefix>s:<session_id>:step     -> int (counter)
+#   <prefix>s:<session_id>:hashes   -> list of strings (LPUSH/LTRIM)
+#   <prefix>s:<session_id>:created  -> float (creation time, set once)
+#   <prefix>s:<session_id>:seen     -> float (updated every write)
+#   <prefix>sessions                -> set of active session ids (for count)
+#
+# All keys under a session share the same TTL. Reads are best-effort:
+# if any key is missing, we treat the session as new. This is safer than
+# raising, because a partial failure should not brick the middleware.
+
+
+class RedisBackend(SessionBackend):
+    """Redis-backed session store.
+
+    Requires the `redis` Python package. Instantiated only when
+    `settings.redis_url` is set.
+
+    The backend is safe for concurrent use across processes. Individual
+    operations are atomic thanks to Redis's INCR, LPUSH, and LTRIM
+    primitives; we avoid read-modify-write races by never GETting then
+    SETting — we always INCR or push.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        ttl_seconds: int = 0,
+        key_prefix: str = "atc:",
+    ) -> None:
+        # Import here so the module can be imported without `redis`
+        # installed when this backend is not in use.
+        import redis  # type: ignore[import-not-found]
+
+        self._redis = redis.Redis.from_url(
+            url,
+            decode_responses=True,
+            socket_timeout=5.0,
+            socket_connect_timeout=5.0,
+        )
+        # Verify the connection eagerly so misconfigurations fail fast.
+        self._redis.ping()
+
+        self._ttl = int(ttl_seconds) if ttl_seconds else 0
+        self._prefix = key_prefix
+        self._started_at = time.time()
+        self._history_window = settings.history_window
+
+    # --- Key helpers -------------------------------------------------------
+
+    def _k(self, suffix: str) -> str:
+        return f"{self._prefix}{suffix}"
+
+    def _sk(self, session_id: str, suffix: str) -> str:
+        return f"{self._prefix}s:{session_id}:{suffix}"
+
+    def _sessions_set(self) -> str:
+        return self._k("sessions")
+
+    # --- Interface ---------------------------------------------------------
+
+    def get_or_create(self, session_id: str) -> SessionSnapshot:
+        step_key = self._sk(session_id, "step")
+        hashes_key = self._sk(session_id, "hashes")
+        created_key = self._sk(session_id, "created")
+        seen_key = self._sk(session_id, "seen")
+
+        pipe = self._redis.pipeline()
+        pipe.get(step_key)
+        pipe.lrange(hashes_key, 0, self._history_window - 1)
+        pipe.get(created_key)
+        pipe.get(seen_key)
+        step_raw, hashes_raw, created_raw, seen_raw = pipe.execute()
+
+        now = time.time()
+
+        if step_raw is None and created_raw is None:
+            # New session — register it and set creation timestamp.
+            # SETNX avoids clobbering if another process just created it.
+            created_set = self._redis.set(
+                created_key, f"{now}", nx=True
+            )
+            if created_set:
+                self._redis.sadd(self._sessions_set(), session_id)
+                self._apply_ttl(
+                    step_key, hashes_key, created_key, seen_key
+                )
+            # Re-read in case another process won the race.
+            created_raw = self._redis.get(created_key)
+
+        step = int(step_raw) if step_raw is not None else 0
+        # hashes are stored newest-first (LPUSH); we reverse to
+        # match the in-memory backend's oldest-first ordering.
+        hashes = list(reversed(hashes_raw)) if hashes_raw else []
+        created = float(created_raw) if created_raw else now
+        seen = float(seen_raw) if seen_raw else now
+
+        return SessionSnapshot(
+            session_id=session_id,
+            step=step,
+            hashes=hashes,
+            created_at=created,
+            last_seen=seen,
+        )
+
+    def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:
+        step_key = self._sk(session_id, "step")
+        hashes_key = self._sk(session_id, "hashes")
+        created_key = self._sk(session_id, "created")
+        seen_key = self._sk(session_id, "seen")
+
+        now = time.time()
+
+        # Atomic sequence:
+        #   1. INCR step
+        #   2. LPUSH hash (newest first)
+        #   3. LTRIM to window
+        #   4. SET created (NX-style, only if missing)
+        #   5. SET seen = now
+        pipe = self._redis.pipeline()
+        pipe.incr(step_key)
+        pipe.lpush(hashes_key, payload_hash)
+        pipe.ltrim(hashes_key, 0, self._history_window - 1)
+        pipe.setnx(created_key, f"{now}")
+        pipe.set(seen_key, f"{now}")
+        step_new, _lpush, _ltrim, _setnx, _set = pipe.execute()
+
+        # Register in the sessions set and apply TTL.
+        self._redis.sadd(self._sessions_set(), session_id)
+        self._apply_ttl(step_key, hashes_key, created_key, seen_key)
+
+        # Read back the current state so the snapshot is authoritative
+        # (another process may have touched this session between calls).
+        return self.get_or_create(session_id)
+
+    def reset(self, session_id: str) -> bool:
+        step_key = self._sk(session_id, "step")
+        hashes_key = self._sk(session_id, "hashes")
+        created_key = self._sk(session_id, "created")
+        seen_key = self._sk(session_id, "seen")
+
+        # Existence check for the return value, then delete.
+        existed = bool(self._redis.exists(step_key, hashes_key, created_key, seen_key))
+        pipe = self._redis.pipeline()
+        pipe.delete(step_key, hashes_key, created_key, seen_key)
+        pipe.srem(self._sessions_set(), session_id)
+        pipe.execute()
+        return existed
+
+    def active_count(self) -> int:
+        return int(self._redis.scard(self._sessions_set()))
+
+    def uptime_seconds(self) -> float:
+        return time.time() - self._started_at
+
+    # --- Internals ---------------------------------------------------------
+
+    def _apply_ttl(self, *keys: str) -> None:
+        if self._ttl <= 0:
+            return
+        pipe = self._redis.pipeline()
+        for k in keys:
+            pipe.expire(k, self._ttl)
+        pipe.execute()
