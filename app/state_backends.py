@@ -44,8 +44,6 @@ class SessionSnapshot:
     created_at: float
     last_seen: float
 
-    # --- Derived helpers (pure functions, no I/O) --------------------------
-
     def consecutive_repeats(self) -> int:
         """Length of the trailing run of identical hashes."""
         if not self.hashes:
@@ -191,29 +189,15 @@ class InMemoryBackend(SessionBackend):
 # ---------------------------------------------------------------------------
 
 
-# Per-session record schema inside Redis:
-#
-#   <prefix>s:<session_id>:step     -> int (counter)
-#   <prefix>s:<session_id>:hashes   -> list of strings (LPUSH/LTRIM)
-#   <prefix>s:<session_id>:created  -> float (creation time, set once)
-#   <prefix>s:<session_id>:seen     -> float (updated every write)
-#   <prefix>sessions                -> set of active session ids (for count)
-#
-# All keys under a session share the same TTL. Reads are best-effort:
-# if any key is missing, we treat the session as new. This is safer than
-# raising, because a partial failure should not brick the middleware.
-
-
 class RedisBackend(SessionBackend):
     """Redis-backed session store.
 
     Requires the `redis` Python package. Instantiated only when
     `settings.redis_url` is set.
 
-    The backend is safe for concurrent use across processes. Individual
-    operations are atomic thanks to Redis's INCR, LPUSH, and LTRIM
-    primitives; we avoid read-modify-write races by never GETting then
-    SETting — we always INCR or push.
+    The backend retries the initial connection with backoff so a
+    container-DNS race (server starting before Redis is DNS-resolvable)
+    does not kill the process.
     """
 
     def __init__(
@@ -222,10 +206,11 @@ class RedisBackend(SessionBackend):
         *,
         ttl_seconds: int = 0,
         key_prefix: str = "atc:",
+        connect_retries: int = 15,
+        connect_backoff_seconds: float = 1.0,
     ) -> None:
-        # Import here so the module can be imported without `redis`
-        # installed when this backend is not in use.
-        import redis  # type: ignore[import-not-found]
+        import redis
+        import socket as _socket
 
         self._redis = redis.Redis.from_url(
             url,
@@ -233,8 +218,38 @@ class RedisBackend(SessionBackend):
             socket_timeout=5.0,
             socket_connect_timeout=5.0,
         )
-        # Verify the connection eagerly so misconfigurations fail fast.
-        self._redis.ping()
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, connect_retries + 1):
+            try:
+                self._redis.ping()
+                logger.info(
+                    "redis_connected attempt=%d url=%s", attempt, url
+                )
+                break
+            except (
+                redis.exceptions.ConnectionError,
+                redis.exceptions.TimeoutError,
+                _socket.gaierror,
+                OSError,
+            ) as e:
+                last_err = e
+                if attempt >= connect_retries:
+                    logger.error(
+                        "redis_connect_gave_up attempts=%d url=%s error=%s",
+                        attempt,
+                        url,
+                        e,
+                    )
+                    raise
+                logger.warning(
+                    "redis_connect_retry attempt=%d/%d url=%s error=%s",
+                    attempt,
+                    connect_retries,
+                    url,
+                    e,
+                )
+                time.sleep(connect_backoff_seconds)
 
         self._ttl = int(ttl_seconds) if ttl_seconds else 0
         self._prefix = key_prefix
@@ -270,22 +285,13 @@ class RedisBackend(SessionBackend):
         now = time.time()
 
         if step_raw is None and created_raw is None:
-            # New session — register it and set creation timestamp.
-            # SETNX avoids clobbering if another process just created it.
-            created_set = self._redis.set(
-                created_key, f"{now}", nx=True
-            )
+            created_set = self._redis.set(created_key, f"{now}", nx=True)
             if created_set:
                 self._redis.sadd(self._sessions_set(), session_id)
-                self._apply_ttl(
-                    step_key, hashes_key, created_key, seen_key
-                )
-            # Re-read in case another process won the race.
+                self._apply_ttl(step_key, hashes_key, created_key, seen_key)
             created_raw = self._redis.get(created_key)
 
         step = int(step_raw) if step_raw is not None else 0
-        # hashes are stored newest-first (LPUSH); we reverse to
-        # match the in-memory backend's oldest-first ordering.
         hashes = list(reversed(hashes_raw)) if hashes_raw else []
         created = float(created_raw) if created_raw else now
         seen = float(seen_raw) if seen_raw else now
@@ -306,26 +312,17 @@ class RedisBackend(SessionBackend):
 
         now = time.time()
 
-        # Atomic sequence:
-        #   1. INCR step
-        #   2. LPUSH hash (newest first)
-        #   3. LTRIM to window
-        #   4. SET created (NX-style, only if missing)
-        #   5. SET seen = now
         pipe = self._redis.pipeline()
         pipe.incr(step_key)
         pipe.lpush(hashes_key, payload_hash)
         pipe.ltrim(hashes_key, 0, self._history_window - 1)
         pipe.setnx(created_key, f"{now}")
         pipe.set(seen_key, f"{now}")
-        step_new, _lpush, _ltrim, _setnx, _set = pipe.execute()
+        pipe.execute()
 
-        # Register in the sessions set and apply TTL.
         self._redis.sadd(self._sessions_set(), session_id)
         self._apply_ttl(step_key, hashes_key, created_key, seen_key)
 
-        # Read back the current state so the snapshot is authoritative
-        # (another process may have touched this session between calls).
         return self.get_or_create(session_id)
 
     def reset(self, session_id: str) -> bool:
@@ -334,8 +331,9 @@ class RedisBackend(SessionBackend):
         created_key = self._sk(session_id, "created")
         seen_key = self._sk(session_id, "seen")
 
-        # Existence check for the return value, then delete.
-        existed = bool(self._redis.exists(step_key, hashes_key, created_key, seen_key))
+        existed = bool(
+            self._redis.exists(step_key, hashes_key, created_key, seen_key)
+        )
         pipe = self._redis.pipeline()
         pipe.delete(step_key, hashes_key, created_key, seen_key)
         pipe.srem(self._sessions_set(), session_id)
@@ -343,7 +341,16 @@ class RedisBackend(SessionBackend):
         return existed
 
     def active_count(self) -> int:
-        return int(self._redis.scard(self._sessions_set()))
+        """Return the number of tracked sessions.
+
+        Fails soft: if Redis is unreachable, returns 0 rather than raising.
+        A health probe should never crash the server.
+        """
+        try:
+            return int(self._redis.scard(self._sessions_set()))
+        except Exception as e:
+            logger.warning("redis_active_count_failed error=%s", e)
+            return 0
 
     def uptime_seconds(self) -> float:
         return time.time() - self._started_at

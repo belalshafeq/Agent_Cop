@@ -26,7 +26,14 @@ logger = logging.getLogger("agenttrafficcop.state")
 
 
 def _select_backend() -> SessionBackend:
-    """Choose a backend based on configuration."""
+    """Choose a backend based on configuration.
+
+    If Redis is configured but unreachable, we retry a few times
+    (handled inside RedisBackend). If it still fails:
+      * In production: raise — fail loudly, do not silently degrade.
+      * In development: log and fall back to in-memory so local dev
+        is not blocked by a missing Redis.
+    """
     if settings.redis_url:
         try:
             backend = RedisBackend(
@@ -42,18 +49,19 @@ def _select_backend() -> SessionBackend:
             )
             return backend
         except Exception as e:
-            # Fail loudly. A misconfigured Redis should not silently
-            # downgrade to in-memory in production — that would break
-            # the multi-replica guarantee without warning.
             logger.error(
-                "session_backend_redis_init_failed error=%s "
-                "falling_back_to=in_memory",
+                "session_backend_redis_init_failed error=%s",
                 e,
             )
-            # In development, falling back is fine. In production, you
-            # probably want to crash instead. Adjust if you prefer.
             if settings.is_production:
+                # In production, a misconfigured Redis is a fatal error.
+                # Silent fallback to in-memory would break the
+                # multi-replica guarantee without warning.
                 raise
+            logger.warning(
+                "session_backend_falling_back backend=in_memory "
+                "reason=dev_mode"
+            )
     logger.info("session_backend_selected backend=in_memory")
     return InMemoryBackend()
 

@@ -1,0 +1,66 @@
+# ============================================================
+# AgentTrafficCop — Docker Compose (bridge networking)
+#
+# This is the standard configuration for production deployments
+# on Linux hosts (Fly.io, Railway, AWS, VPS, bare metal).
+#
+# Do NOT use this file on GitHub Codespaces — see
+# docker-compose.codespaces.yml for the reason.
+#
+# Usage:
+#   docker compose up -d --build
+#   docker compose down -v        # also wipe the redis volume
+# ============================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: atc-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "yes"
+    volumes:
+      - atc-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - atc-net
+
+  atc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agenttrafficcop:local
+    container_name: atc-server
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ATC_REDIS_URL: "redis://redis:6379/0"
+      ATC_HOST: "0.0.0.0"
+      ATC_PORT: "8000"
+      ATC_ENV: "production"
+    ports:
+      - "8000:8000"
+    networks:
+      - atc-net
+
+volumes:
+  atc-redis-data:
+    driver: local
+
+networks:
+  atc-net:
+    driver: bridge

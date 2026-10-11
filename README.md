@@ -303,6 +303,46 @@ All settings are read from environment variables (or `.env`):
 
 ## Project Layout
 
+## Docker Deployment
+
+Two compose files ship with this repo, for two different environments.
+
+### On a real Linux host (production)
+
+```bash
+docker compose up -d --build
+```
+
+Uses standard bridge networking. Works on Fly.io, Railway, AWS, VPS, bare metal.
+
+### On GitHub Codespaces (development)
+
+```bash
+docker compose -f docker-compose.codespaces.yml up -d --build
+```
+
+Uses host networking because GitHub Codespaces' Docker daemon
+**cannot create working bridge networks**. Every bridge interface on
+Codespaces comes up in `NO-CARRIER` / `DOWN` state, so containers
+attached to a bridge can never reach each other. This is a
+Codespaces-level limitation, not a bug in this project.
+
+Diagnostic signature of the Codespaces issue:
+
+```bash
+ip link show type bridge
+# → docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> ... state DOWN
+# → br-xxxxxxxx: <NO-CARRIER,BROADCAST,MULTICAST,UP> ... state DOWN
+```
+
+Host networking bypasses this by putting both containers on the
+Codespace VM's own network namespace and talking over `127.0.0.1`.
+This is safe here because the VM is already isolated.
+
+**Rule of thumb:** if `ip link show type bridge` shows `NO-CARRIER`,
+you're on Codespaces (or a similar sandbox) and should use the
+`.codespaces.yml` file.
+
 ```
 agenttrafficcop/
 ├── app/                          # server

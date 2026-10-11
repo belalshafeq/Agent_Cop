@@ -75,11 +75,27 @@ async def route_message(
     summary="System health check.",
 )
 async def health() -> HealthResponse:
-    """Liveness/readiness probe. Intentionally unauthenticated."""
+    """Liveness/readiness probe. Intentionally unauthenticated.
+
+    Never raises. If the session backend is unreachable, we still
+    return 200 with active_sessions=0 and log the failure — because
+    a health check that 500s is not useful to an orchestrator.
+    """
+    try:
+        active = session_store.active_count()
+    except Exception as e:
+        logger.error("health_active_count_failed error=%s", e)
+        active = 0
+
+    try:
+        uptime = session_store.uptime_seconds()
+    except Exception:
+        uptime = 0.0
+
     return HealthResponse(
         version=__version__,
-        active_sessions=session_store.active_count(),
-        uptime_seconds=round(session_store.uptime_seconds(), 3),
+        active_sessions=active,
+        uptime_seconds=round(uptime, 3),
     )
 
 

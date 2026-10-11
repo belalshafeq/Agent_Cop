@@ -1,0 +1,62 @@
+# ============================================================
+# AgentTrafficCop — Docker Compose (host networking, Codespaces)
+#
+# This file exists because GitHub Codespaces' Docker daemon
+# cannot create working bridge networks. The bridge interfaces
+# come up with NO-CARRIER and state DOWN, so containers attached
+# to them can never reach each other.
+#
+# Diagnostic signature on Codespaces:
+#     ip link show type bridge
+#     → docker0: <NO-CARRIER,...> ... state DOWN
+#     → br-xxxxxxxx: <NO-CARRIER,...> ... state DOWN
+#
+# Host networking bypasses this entirely by putting both
+# containers on the Codespace VM's own network namespace and
+# talking over 127.0.0.1. This is safe here because the VM is
+# already isolated.
+#
+# Usage in a Codespace:
+#   docker compose -f docker-compose.codespaces.yml up -d --build
+#   docker compose -f docker-compose.codespaces.yml down -v
+# ============================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: atc-redis
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - redis-server
+      - --bind
+      - "127.0.0.1"
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "yes"
+    volumes:
+      - atc-redis-data:/data
+
+  atc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agenttrafficcop:local
+    container_name: atc-server
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      ATC_REDIS_URL: "redis://127.0.0.1:6379/0"
+      ATC_HOST: "0.0.0.0"
+      ATC_PORT: "8000"
+      ATC_ENV: "development"
+
+volumes:
+  atc-redis-data:
+    driver: local

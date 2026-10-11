@@ -1,0 +1,38 @@
+# Secrets — never bake these into an image.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+credentials/
+
+# Git metadata
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / IDE / OS
+node_modules/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in the runtime image)
+README.md
+sdk/README.md
+examples/
+
+# Local dev artifacts
+*.log
+logs/
