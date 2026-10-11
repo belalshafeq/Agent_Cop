@@ -5,13 +5,21 @@ governance middleware.
 
 - **Async-first** — no blocking calls, no sync/async confusion.
 - **Typed exceptions** — catch `LoopDetected`, not `HTTP 422`.
-- **Connection pooling** — one `httpx.AsyncClient` per `Guard` instance.
+- **Connection pooling** — one `httpx.AsyncClient` per `Guard` instance,
+  safely reused across nested event loops.
 - **No surprises** — the SDK mirrors the server's contracts exactly.
+- **LangGraph adapter** — wrap any node in one line.
 
 ## Install
 
 ```bash
 pip install -e ./sdk
+```
+
+With LangGraph support:
+
+```bash
+pip install -e "./sdk[langgraph]"
 ```
 
 (Once this repo is published, `pip install agenttrafficcop` will also work.)
@@ -93,10 +101,83 @@ except AgentTrafficCopError as e:
     # ... decide what to do
 ```
 
+## LangGraph Integration
+
+If you're using [LangGraph](https://langchain-ai.github.io/langgraph/),
+the SDK ships an optional adapter that wraps any node so its handoff
+passes through AgentTrafficCop before the node runs.
+
+### Install the extra
+
+```bash
+pip install -e "./sdk[langgraph]"
+```
+
+### Wrap any node in one line
+
+```python
+from agenttrafficcop import Guard
+from agenttrafficcop.langgraph import guarded_node
+
+guard = Guard(url="http://localhost:8000", api_key="your-key")
+
+graph.add_node(
+    "reviewer",
+    guarded_node(
+        reviewer_fn,
+        guard=guard,
+        sender="coder",
+        recipient="reviewer",
+        # Both of these can be static values OR callables that take
+        # the LangGraph state and return the value.
+        session_id=lambda state: state["run_id"],
+        payload=lambda state: {"draft": state["draft"]},
+    ),
+)
+```
+
+That's it. Every time LangGraph invokes the `reviewer` node,
+AgentTrafficCop sees a handoff. If the breaker trips, the node raises
+before doing any work.
+
+### What if I don't supply `payload=`?
+
+The wrapper falls back to hashing the entire state dict (minus a small
+denylist of known-noise keys like `messages`, `history`, `trace`). This
+works for small graphs, but for real graphs you should supply an
+explicit `payload=` extractor — otherwise a growing message history
+could cause false-positive trips.
+
+### Sync nodes
+
+`guarded_node` supports sync and async node functions. Sync nodes are
+called directly; async nodes are awaited. The guard call itself is
+always async, so if you use a sync node you must call it from a sync
+context (no running event loop). For anything async-first, make the
+node `async def` and everything works.
+
+### Handling trips without raising
+
+By default, a breaker trip raises the SDK exception (e.g.
+`LoopDetected`) and propagates out of the node. If you'd rather handle
+trips via state — for example, to route to a human-review node — pass:
+
+```python
+guarded_node(..., raise_on_trip=False)
+```
+
+The node becomes a no-op on a trip, and the graph continues.
+
+### Full example
+
+See [`examples/langgraph_demo.py`](../examples/langgraph_demo.py)
+for a runnable two-node graph that visibly trips the breaker.
+
 ## Compatibility
 
 - Python 3.11+
 - `httpx` 0.27.x
+- LangGraph 1.2.x (optional)
 - Works against any AgentTrafficCop server 1.0.0+
 
 ## License

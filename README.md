@@ -1,10 +1,19 @@
-# Agent_Cop
+# AgentTrafficCop
 
 A zero-config **Multi-Agent Orchestration & Governance Middleware**.
 
 Sits between communicating AI agents, validates every handoff against a
 strict schema, fingerprints the payload with SHA-256, and trips a
 circuit breaker before an infinite loop burns your budget.
+
+## What It Does
+
+- **Schema shield** — every message validated against a strict Pydantic v2 contract.
+- **Loop detection** — SHA-256 payload hashing catches identical and cyclic (A↔B) loops.
+- **Circuit breaker** — step limits, consecutive-repeat limits, cycle limits.
+- **Structured errors** — HTTP 422 with stable error codes and diagnostics.
+- **Bearer authentication** — constant-time API key comparison.
+- **Bounded memory** — LRU-capped sessions, fixed-length hash history.
 
 ## See It In Action
 
@@ -66,15 +75,6 @@ Demo complete.
 
 The demo is deterministic and needs no LLM API key — the two agents
 are simulated so the loop trips the same way every run.
-
-## What It Does
-
-- **Schema shield** — every message validated against a strict Pydantic v2 contract.
-- **Loop detection** — SHA-256 payload hashing catches identical and cyclic (A↔B) loops.
-- **Circuit breaker** — step limits, consecutive-repeat limits, cycle limits.
-- **Structured errors** — HTTP 422 with stable error codes and diagnostics.
-- **Bearer authentication** — constant-time API key comparison.
-- **Bounded memory** — LRU-capped sessions, fixed-length hash history.
 
 ## Install & Run
 
@@ -166,10 +166,57 @@ curl -X DELETE http://localhost:8000/v1/sessions/run-42 \
   -H "authorization: Bearer $ATC_KEY"
 ```
 
+## LangGraph Support
+
+AgentTrafficCop ships with a first-class
+[LangGraph](https://langchain-ai.github.io/langgraph/) adapter. Wrap any
+node in your graph and every handoff passes through the cop:
+
+```python
+from agenttrafficcop import Guard
+from agenttrafficcop.langgraph import guarded_node
+
+guard = Guard(url="http://localhost:8000", api_key="your-key")
+
+graph.add_node(
+    "reviewer",
+    guarded_node(
+        reviewer_fn,
+        guard=guard,
+        sender="coder",
+        recipient="reviewer",
+        session_id=lambda s: s["run_id"],
+        payload=lambda s: {"draft": s["draft"]},
+    ),
+)
+```
+
+Install the extra:
+
+```bash
+pip install -e "./sdk[langgraph]"
+```
+
+Run the full working example:
+
+```bash
+# Terminal 1
+python run.py
+
+# Terminal 2
+export ATC_KEY=$(grep '^ATC_API_KEYS=' .env | cut -d= -f2-)
+python examples/langgraph_demo.py
+```
+
+The demo builds a real LangGraph with a coder and reviewer node and
+watches the breaker trip around step 7. See
+[`examples/langgraph_demo.py`](examples/langgraph_demo.py) for the full
+source.
+
 ## Wiring It Into Your Orchestrator
 
-AgentTrafficCop does not call your agents. **You** call AgentTrafficCop before
-each handoff:
+AgentTrafficCop does not call your agents. **You** call AgentTrafficCop
+before each handoff:
 
 ```python
 import httpx
@@ -198,8 +245,24 @@ async def safe_handoff(sender, recipient, payload, session_id):
     return r.json()
 ```
 
-Every A→B message goes through `safe_handoff`. The cop validates, hashes,
-checks the breaker, and returns 200 or 422. You decide what to do with 422.
+Or use the Python SDK for a cleaner interface:
+
+```python
+from agenttrafficcop import Guard, LoopDetected
+
+guard = Guard(url=ATC_URL, api_key=ATC_KEY)
+
+try:
+    result = await guard.check(
+        session_id="run-42",
+        sender="coder",
+        recipient="reviewer",
+        payload={"diff": "fix typo"},
+    )
+    print("approved at step", result.step)
+except LoopDetected as e:
+    print("loop caught:", e.error_code, e.diagnostics)
+```
 
 ## Configuration
 
@@ -242,22 +305,36 @@ All settings are read from environment variables (or `.env`):
 
 ```
 agenttrafficcop/
-├── app/
-│   ├── __init__.py          # version, package marker
-│   ├── config.py            # env-driven settings
-│   ├── security.py          # Bearer auth, constant-time compare
-│   ├── schemas.py           # Pydantic v2 contracts
-│   ├── exceptions.py        # error types + FastAPI handlers
-│   ├── hashing.py           # canonical JSON + SHA-256
-│   ├── state.py             # thread-safe session store
-│   ├── circuit_breaker.py   # the breaker logic
-│   ├── logging_config.py    # structured JSON logging
-│   ├── routes.py            # HTTP endpoints
-│   └── main.py              # FastAPI app factory
+├── app/                          # server
+│   ├── __init__.py
+│   ├── config.py
+│   ├── security.py
+│   ├── schemas.py
+│   ├── exceptions.py
+│   ├── hashing.py
+│   ├── state.py
+│   ├── circuit_breaker.py
+│   ├── logging_config.py
+│   ├── routes.py
+│   └── main.py
+├── sdk/                          # Python client
+│   ├── pyproject.toml
+│   ├── README.md
+│   └── agenttrafficcop/
+│       ├── __init__.py
+│       ├── exceptions.py
+│       ├── models.py
+│       ├── client.py
+│       ├── langgraph.py
+│       └── py.typed
+├── examples/
+│   └── langgraph_demo.py         # runnable LangGraph demo
+├── demo.py                       # reference demo
+├── demo_agents.py
+├── run.py                        # server entrypoint
+├── requirements.txt
 ├── .env.example
 ├── .gitignore
-├── requirements.txt
-├── run.py                   # local entrypoint
 └── README.md
 ```
 
