@@ -59,7 +59,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         base: Dict[str, Any] = {
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S") + "Z",
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

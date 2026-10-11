@@ -19,10 +19,17 @@ Usage:
 The client is async-first. A sync wrapper is intentionally not provided
 in v0.1.0 — agent orchestrators are almost always async, and adding a
 sync path doubles the surface area for bugs.
+
+Multi-loop safety:
+    Some frameworks (notably LangGraph) create child event loops. If a
+    Guard instance is reused across loops, the cached httpx.AsyncClient
+    would be bound to the wrong loop. We detect this and transparently
+    rebuild the client for the currently running loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional
 
 import httpx
@@ -61,11 +68,11 @@ class Guard:
         if timeout <= 0:
             raise ValueError("timeout must be positive")
 
-        # Normalize: strip trailing slashes so we can safely concatenate.
         self._base_url = url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # --- Lifecycle ----------------------------------------------------------
 
@@ -77,15 +84,55 @@ class Guard:
         await self.close()
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+        """Return an AsyncClient bound to the *current* event loop.
+
+        We detect a loop mismatch (LangGraph and some frameworks create
+        child event loops) and transparently create a fresh client. This
+        keeps the "one client per Guard" optimization for the common case
+        while remaining correct under nested/multiple event loops.
+        """
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — we're being called from sync code. Create
+            # a client anyway; the caller will hit an error on first use
+            # with a clearer message than ours would be.
+            current_loop = None
+
+        if (
+            self._client is not None
+            and not self._client.is_closed
+            and self._client_loop is current_loop
+        ):
+            return self._client
+
+        # Either no client yet, or it's bound to a different loop.
+        # Close the old one if it's still open and its loop is alive.
+        old = self._client
+        if old is not None and not old.is_closed:
+            try:
+                await old.aclose()
+            except RuntimeError:
+                # Old client was bound to a dead loop; drop it.
+                pass
+
+        self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._client_loop = current_loop
         return self._client
 
     async def close(self) -> None:
-        """Close the underlying HTTP client. Safe to call multiple times."""
-        if self._client is not None and not self._client.is_closed:
-            await self._client.aclose()
+        """Close the underlying HTTP client. Safe to call multiple times
+        and from any event loop context."""
+        client = self._client
         self._client = None
+        self._client_loop = None
+        if client is None or client.is_closed:
+            return
+        try:
+            await client.aclose()
+        except RuntimeError:
+            # Client was bound to a loop that has since closed.
+            pass
 
     # --- Public API ---------------------------------------------------------
 
@@ -99,28 +146,7 @@ class Guard:
         intent: str = "handoff",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> RouteResult:
-        """Send one agent-to-agent message through the cop.
-
-        Args:
-            session_id:  Unique session/graph-run identifier.
-            sender:      Identifier of the emitting agent.
-            recipient:   Identifier of the target agent.
-            payload:     Structured dict handed off between agents.
-            intent:      One of request / response / handoff / tool_call /
-                         tool_result / error. Defaults to "handoff".
-            metadata:    Optional dict of non-semantic metadata.
-
-        Returns:
-            RouteResult on success (HTTP 200).
-
-        Raises:
-            LoopDetected:        Repeated or cyclic payload detected.
-            StepLimitExceeded:   Session exceeded max steps.
-            SchemaRejected:      Server rejected the message schema.
-            AuthError:           Missing or invalid API key (HTTP 401).
-            ConnectionError:     Could not reach the server.
-            AgentTrafficCopError: Any other error from the server.
-        """
+        """Send one agent-to-agent message through the cop."""
         body: Dict[str, Any] = {
             "session_id": session_id,
             "sender": sender,
@@ -147,7 +173,6 @@ class Guard:
                 diagnostics={"underlying": e.__class__.__name__},
             ) from e
 
-        # --- 200: success ---------------------------------------------------
         if response.status_code == 200:
             try:
                 parsed = response.json()
@@ -168,7 +193,6 @@ class Guard:
                     diagnostics={"body_preview": response.text[:200]},
                 ) from e
 
-        # --- 401: auth -----------------------------------------------------
         if response.status_code == 401:
             raise AuthError(
                 "AgentTrafficCop rejected the API key.",
@@ -177,7 +201,6 @@ class Guard:
                 diagnostics={"body_preview": response.text[:200]},
             )
 
-        # --- 422: governance violation or schema error ---------------------
         if response.status_code == 422:
             try:
                 parsed = response.json()
@@ -190,7 +213,6 @@ class Guard:
                 }
             raise exception_from_response(parsed)
 
-        # --- Anything else: wrap generically -------------------------------
         raise AgentTrafficCopError(
             f"AgentTrafficCop returned unexpected HTTP "
             f"{response.status_code}.",
