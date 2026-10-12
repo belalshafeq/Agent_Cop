@@ -341,6 +341,123 @@ Metrics never include session IDs, API key fingerprints, payload
 contents, client IPs, or any user-controlled string. Unbounded
 cardinality crashes Prometheus; bounded cardinality is the whole point.
 
+## Audit Log
+
+AgentTrafficCop can persist every governance event to a JSON Lines
+file for compliance, debugging, and post-incident analysis.
+
+**Disabled by default.** Enable it by setting `ATC_AUDIT_LOG_ENABLED=true`
+and `ATC_AUDIT_LOG_PATH=/path/to/audit.log`.
+
+### What gets logged
+
+Only **governance events** — not every approval.
+
+| Event | Written when |
+|---|---|
+| `trip` | The circuit breaker fires (`REPEATED_PAYLOAD_LOOP`, `CYCLIC_PAYLOAD_LOOP`, `STEP_LIMIT_EXCEEDED`) |
+| `reset` | A session is deleted via `DELETE /v1/sessions/{id}` |
+| `auth_failed` | An API key is missing, malformed, or invalid |
+| `schema_failed` | An incoming message fails Pydantic validation |
+| `rate_limited` | A client exceeds the rate limit |
+
+**Approvals are NOT logged.** If you need a record of every successful
+message, that's a Phase 3 feature. For now, the audit log is scoped to
+governance events only — a few thousand lines per day in a typical
+deployment, not millions.
+
+### File format
+
+Every line is a complete JSON object. Newline-delimited.
+
+```json
+{"ts":"2026-10-12T10:47:05.954123Z","event":"trip","error_code":"REPEATED_PAYLOAD_LOOP","session_id":"audit-test","step":3,"sender":"coder","recipient":"reviewer","diagnostics":{"repeated_hash":"5041bf...","consecutive_repeats":3,"max_repeated_hashes":3},"api_key_fingerprint":"dee50c67"}
+{"ts":"2026-10-12T10:47:06.011085Z","event":"reset","session_id":"audit-test","removed":true,"api_key_fingerprint":"dee50c67"}
+{"ts":"2026-10-12T10:47:06.074092Z","event":"schema_failed","session_id":"x","error_count":4}
+```
+
+**Security notes:**
+- API keys are recorded as **fingerprints only** (truncated SHA-256) — never the raw key.
+- Payload contents are **never** logged — only their SHA-256 hash, and only on trips.
+- The file is plain text on disk. Whoever can read it can read it. Treat it like any other sensitive log.
+
+### Querying the log
+
+The file is designed to work with standard Unix tools.
+
+**Count trips today:**
+
+```bash
+grep '"event":"trip"' audit.log | wc -l
+```
+
+**Find all trips for a specific session:**
+
+```bash
+grep '"session_id":"demo-loop"' audit.log
+```
+
+**Extract only trip reasons using `jq`:**
+
+```bash
+jq -r 'select(.event == "trip") | .error_code' audit.log | sort | uniq -c
+```
+
+**Watch the log live:**
+
+```bash
+tail -f audit.log | jq -c '.'
+```
+
+**Find sessions that tripped more than once:**
+
+```bash
+jq -r 'select(.event == "trip") | .session_id' audit.log \
+  | sort | uniq -c | sort -rn | head
+```
+
+**Export to CSV for a report:**
+
+```bash
+jq -r '[.ts, .event, .error_code // "", .session_id // ""] | @csv' audit.log
+```
+
+### Retention
+
+The file grows until you do something about it. Recommended retention:
+
+- **Development:** keep whatever you want; delete when it bothers you.
+- **Production:** rotate daily or weekly with `logrotate`, keep 90 days.
+- **Regulated:** ship to S3 or a database, keep 1+ years, sign for tamper-evidence.
+
+**Basic `logrotate` config** (`/etc/logrotate.d/agenttrafficcop`):
+
+```
+/path/to/audit.log {
+    daily
+    rotate 90
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+`copytruncate` is important — it truncates the file in place so the
+server's open file handle keeps working without a restart.
+
+### Disabling the audit log
+
+Set `ATC_AUDIT_LOG_ENABLED=false` (or unset `ATC_AUDIT_LOG_PATH`).
+All audit calls become no-ops. Zero overhead.
+
+### Failure modes
+
+The audit log **never blocks a request**. If the file can't be written
+(disk full, permissions, network filesystem failure), the error is
+logged to stderr and the request proceeds. Governance is always more
+important than record-keeping.
+
 ## Docker Deployment
 
 Two compose files ship with this repo, for two different environments.
