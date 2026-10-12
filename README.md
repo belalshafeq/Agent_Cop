@@ -14,6 +14,9 @@ circuit breaker before an infinite loop burns your budget.
 - **Structured errors** — HTTP 422 with stable error codes and diagnostics.
 - **Bearer authentication** — constant-time API key comparison.
 - **Bounded memory** — LRU-capped sessions, fixed-length hash history.
+- **Redis-backed sessions** — optional; survives restarts, scales horizontally.
+- **Prometheus metrics** — `/metrics` endpoint, zero external dependencies.
+- **LangGraph integration** — wrap any node in one line.
 
 ## See It In Action
 
@@ -264,44 +267,79 @@ except LoopDetected as e:
     print("loop caught:", e.error_code, e.diagnostics)
 ```
 
-## Configuration
+## Metrics
 
-All settings are read from environment variables (or `.env`):
+AgentTrafficCop exposes Prometheus metrics at `GET /metrics`. No
+external dependencies — the exposition format is generated directly.
 
-| Env var | Default | Meaning |
-|---|---|---|
-| `ATC_HOST` | `0.0.0.0` | Bind address |
-| `ATC_PORT` | `8000` | Bind port |
-| `ATC_ENV` | `development` | `production` disables `/docs` |
-| `ATC_LOG_LEVEL` | `INFO` | Log level |
-| `ATC_API_KEYS` | (none) | Comma-separated Bearer keys. **Required.** |
-| `ATC_MAX_STEPS` | `25` | Hard cap on hops per session |
-| `ATC_MAX_REPEATED_HASHES` | `3` | Consecutive identical payloads before trip |
-| `ATC_MAX_CYCLE_LENGTH` | `2` | Max cycle length scanned |
-| `ATC_MAX_CYCLE_REPEATS` | `3` | Full cycle repeats before trip |
-| `ATC_HISTORY_WINDOW` | `16` | Hashes retained per session |
-| `ATC_MAX_SESSIONS` | `10000` | LRU cap on concurrent sessions |
-| `ATC_MAX_BODY_BYTES` | `1048576` | Reserved for future body-size enforcement |
+### What's exposed
 
-## Security Notes
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `atc_requests_total` | counter | `endpoint`, `method`, `status` | Every HTTP request, by endpoint and outcome |
+| `atc_request_duration_seconds` | histogram | `endpoint` | Request latency distribution |
+| `atc_messages_approved_total` | counter | — | Total messages that passed governance |
+| `atc_governance_trips_total` | counter | `reason` | Circuit breaker trips (`repeated_payload`, `cyclic_payload`, `step_limit`) |
+| `atc_sessions_active` | gauge | — | Current active session count |
+| `atc_uptime_seconds` | gauge | — | Process uptime |
 
-- **Auth is fail-closed** — if `ATC_API_KEYS` is empty, every `/v1/route` call is rejected with 401.
-- **Constant-time key comparison** — prevents timing attacks.
-- **No secrets in logs** — only truncated SHA-256 fingerprints for correlation.
-- **No `pickle` / `eval` / `exec`** — hashing uses canonical JSON.
-- **Bounded memory** — sessions and hash histories are capped.
-- **HTTPS/TLS is your responsibility** — put this behind nginx, Caddy, or a cloud LB.
+**Cardinality is bounded.** Session IDs, API keys, and payload contents
+never appear as labels — only fixed, low-cardinality values.
 
-## Limitations (honest list)
+### Scraping with Prometheus
 
-- **Single-process only.** Sessions live in memory; a restart loses them. For
-  multi-replica deployments, back the store with Redis (not implemented yet).
-- **Exact-hash loop detection only.** Semantically-equivalent-but-differently-worded
-  loops are not caught. Adding embeddings is a future feature.
-- **No rate limiting.** Add `slowapi` or a reverse-proxy limiter if needed.
-- **No persistence.** This is a runtime shield, not a database.
+Add this to your `prometheus.yml`:
 
-## Project Layout
+```yaml
+scrape_configs:
+  - job_name: agenttrafficcop
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["your-atc-host:8000"]
+    metrics_path: /metrics
+```
+
+No authentication is required for `/metrics` — Prometheus scrapers
+typically don't support Bearer auth, and metrics contain no sensitive
+data (only aggregate counts and latencies).
+
+### Example PromQL queries
+
+```promql
+# Messages approved per second
+rate(atc_messages_approved_total[1m])
+
+# Trip rate, grouped by reason
+rate(atc_governance_trips_total[5m])
+
+# p95 latency of /v1/route
+histogram_quantile(
+  0.95,
+  rate(atc_request_duration_seconds_bucket{endpoint="/v1/route"}[5m])
+)
+
+# HTTP error rate
+sum(rate(atc_requests_total{status=~"4..|5.."}[5m]))
+  /
+sum(rate(atc_requests_total[5m]))
+```
+
+### Disabling metrics
+
+Set `ATC_METRICS_ENABLED=false` in your environment. The `/metrics`
+endpoint returns a stub body (`# metrics disabled`), and the middleware
+stops recording.
+
+### Customizing the path
+
+Set `ATC_METRICS_PATH=/internal/metrics` if `/metrics` clashes with
+another service.
+
+### What's NOT exposed
+
+Metrics never include session IDs, API key fingerprints, payload
+contents, client IPs, or any user-controlled string. Unbounded
+cardinality crashes Prometheus; bounded cardinality is the whole point.
 
 ## Docker Deployment
 
@@ -335,13 +373,29 @@ ip link show type bridge
 # → br-xxxxxxxx: <NO-CARRIER,BROADCAST,MULTICAST,UP> ... state DOWN
 ```
 
-Host networking bypasses this by putting both containers on the
-Codespace VM's own network namespace and talking over `127.0.0.1`.
-This is safe here because the VM is already isolated.
-
 **Rule of thumb:** if `ip link show type bridge` shows `NO-CARRIER`,
 you're on Codespaces (or a similar sandbox) and should use the
 `.codespaces.yml` file.
+
+## Development
+
+### Running the tests
+
+```bash
+pip install -r requirements.txt
+pytest
+```
+
+The full suite runs in about 1 second. It covers hashing, security,
+the circuit breaker, all HTTP routes, the metrics system, and
+end-to-end scenarios.
+
+### Continuous Integration
+
+Every push to `main` and every pull request runs the test suite via
+GitHub Actions. See `.github/workflows/ci.yml`.
+
+### Project layout
 
 ```
 agenttrafficcop/
@@ -353,8 +407,11 @@ agenttrafficcop/
 │   ├── exceptions.py
 │   ├── hashing.py
 │   ├── state.py
+│   ├── state_backends.py
 │   ├── circuit_breaker.py
 │   ├── logging_config.py
+│   ├── middleware.py
+│   ├── metrics.py
 │   ├── routes.py
 │   └── main.py
 ├── sdk/                          # Python client
@@ -369,14 +426,77 @@ agenttrafficcop/
 │       └── py.typed
 ├── examples/
 │   └── langgraph_demo.py         # runnable LangGraph demo
+├── tests/                        # pytest suite
+│   ├── conftest.py
+│   ├── test_hashing.py
+│   ├── test_security.py
+│   ├── test_circuit_breaker.py
+│   ├── test_routes.py
+│   ├── test_integration.py
+│   ├── test_metrics.py
+│   └── test_middleware.py
 ├── demo.py                       # reference demo
 ├── demo_agents.py
 ├── run.py                        # server entrypoint
 ├── requirements.txt
+├── pyproject.toml                # pytest config
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose.codespaces.yml
+├── .github/workflows/ci.yml
 ├── .env.example
 ├── .gitignore
 └── README.md
 ```
+
+## Configuration
+
+All settings are read from environment variables (or `.env`):
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `ATC_HOST` | `0.0.0.0` | Bind address |
+| `ATC_PORT` | `8000` | Bind port |
+| `ATC_ENV` | `development` | `production` disables `/docs` |
+| `ATC_LOG_LEVEL` | `INFO` | Log level |
+| `ATC_API_KEYS` | (none) | Comma-separated Bearer keys. **Required.** |
+| `ATC_RATE_LIMIT_PER_MINUTE` | `120` | Per-client request limit |
+| `ATC_MAX_BODY_BYTES` | `1048576` | Maximum request body size |
+| `ATC_METRICS_ENABLED` | `true` | Enable `/metrics` endpoint |
+| `ATC_METRICS_PATH` | `/metrics` | Path for the metrics endpoint |
+| `ATC_REDIS_URL` | (none) | If set, use Redis for sessions |
+| `ATC_REDIS_TTL_SECONDS` | `86400` | Session TTL in Redis |
+| `ATC_REDIS_KEY_PREFIX` | `atc:` | Redis key namespace |
+| `ATC_MAX_STEPS` | `25` | Hard cap on hops per session |
+| `ATC_MAX_REPEATED_HASHES` | `3` | Consecutive identical payloads before trip |
+| `ATC_MAX_CYCLE_LENGTH` | `2` | Max cycle length scanned |
+| `ATC_MAX_CYCLE_REPEATS` | `3` | Full cycle repeats before trip |
+| `ATC_HISTORY_WINDOW` | `16` | Hashes retained per session |
+| `ATC_MAX_SESSIONS` | `10000` | LRU cap on concurrent sessions |
+
+## Security Notes
+
+- **Auth is fail-closed** — if `ATC_API_KEYS` is empty, every `/v1/route` call is rejected with 401.
+- **Constant-time key comparison** — prevents timing attacks.
+- **No secrets in logs** — only truncated SHA-256 fingerprints for correlation.
+- **No `pickle` / `eval` / `exec`** — hashing uses canonical JSON.
+- **Bounded memory** — sessions and hash histories are capped.
+- **Bounded metric cardinality** — no user-controlled values in labels.
+- **Body size limit** — rejects oversized requests before reading them.
+- **HTTPS/TLS is your responsibility** — put this behind nginx, Caddy, or a cloud LB.
+
+## Limitations (honest list)
+
+- **In-memory backend is single-process.** Sessions do not survive restarts
+  and are not shared across replicas. Use Redis for multi-replica deployments.
+- **Exact-hash loop detection only.** Semantically-equivalent-but-differently-worded
+  loops are not caught. Adding embeddings is a future feature.
+- **Rate limiting is per-process.** With multiple replicas, each has its own
+  counter. A shared Redis-backed limiter is a future feature.
+- **No audit log.** Governance events are logged but not persisted to disk.
+- **No admin API.** Sessions can be reset individually by ID, but there is no
+  listing or bulk-cleanup endpoint.
+- **No multi-tenancy.** One API key list for all users; sessions are global.
 
 ## License
 
