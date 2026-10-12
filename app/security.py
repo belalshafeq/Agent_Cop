@@ -5,6 +5,7 @@ Design principles:
   * Constant-time comparison — no timing side-channels.
   * No secrets in logs — only an opaque fingerprint for debugging.
   * Standard HTTP semantics — 401 with WWW-Authenticate per RFC 6750.
+  * Every failure writes to the audit log.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Annotated
 
 from fastapi import Header, HTTPException, status
 
+from .audit import audit
 from .config import settings
 
 logger = logging.getLogger("agenttrafficcop.security")
@@ -24,9 +26,9 @@ logger = logging.getLogger("agenttrafficcop.security")
 def _fingerprint(value: str) -> str:
     """Return a short, non-reversible fingerprint of a secret.
 
-    Used ONLY for log correlation. The full secret never appears in logs,
-    and the fingerprint is a truncated SHA-256 — you cannot recover the
-    original from it.
+    Used ONLY for log correlation. The full secret never appears in
+    logs, and the fingerprint is a truncated SHA-256 — you cannot
+    recover the original from it.
     """
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
 
@@ -52,16 +54,15 @@ def verify_api_key(
 ) -> str:
     """FastAPI dependency: verify the incoming API key.
 
-    Returns the *fingerprint* of the matched key (never the key itself),
-    so downstream code can attach it to logs without leaking the secret.
+    Returns the *fingerprint* of the matched key (never the key itself).
 
     Raises:
-        HTTPException(401): if auth is enabled and the key is missing,
-            malformed, or invalid.
+        HTTPException(401) on missing, malformed, or invalid key.
     """
     # Fail-closed: if no keys are configured, refuse everything.
     if not settings.auth_enabled:
         logger.warning("auth_misconfigured no api keys configured")
+        _audit_auth_failure(reason="auth_not_configured")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
@@ -77,6 +78,7 @@ def verify_api_key(
     token = _extract_bearer(authorization)
     if token is None:
         logger.warning("auth_missing_or_malformed")
+        _audit_auth_failure(reason="missing_or_malformed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
@@ -86,18 +88,18 @@ def verify_api_key(
             headers={"WWW-Authenticate": 'Bearer realm="agenttrafficcop"'},
         )
 
-    # Constant-time comparison against every configured key.
-    # We do NOT break early on match — the loop always runs to completion
-    # so the time taken is independent of which key matched (or if none did).
     matched_fingerprint: str | None = None
     for candidate in settings.api_keys:
         if secrets.compare_digest(token, candidate):
             matched_fingerprint = _fingerprint(candidate)
-        # Note: no `break` — deliberate.
 
     if matched_fingerprint is None:
         logger.warning(
             "auth_rejected token_fingerprint=%s", _fingerprint(token)
+        )
+        _audit_auth_failure(
+            reason="invalid_key",
+            token_fingerprint=_fingerprint(token),
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -109,3 +111,18 @@ def verify_api_key(
         )
 
     return matched_fingerprint
+
+
+def _audit_auth_failure(
+    *,
+    reason: str,
+    token_fingerprint: str | None = None,
+) -> None:
+    """Write an auth failure to the audit log. Never raises."""
+    try:
+        audit.log_auth_failed(
+            reason=reason,
+            api_key_fingerprint=token_fingerprint,
+        )
+    except Exception:
+        pass

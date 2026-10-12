@@ -9,6 +9,9 @@ os.environ["ATC_API_KEYS"] = "test-key-1,test-key-2"
 os.environ["ATC_ENV"] = "development"
 os.environ["ATC_LOG_LEVEL"] = "WARNING"
 os.environ.pop("ATC_REDIS_URL", None)
+# Disable audit logging by default; individual tests enable it explicitly.
+os.environ.pop("ATC_AUDIT_LOG_ENABLED", None)
+os.environ.pop("ATC_AUDIT_LOG_PATH", None)
 
 # --- Force in-memory backend at the Settings level ---------------------------
 import app.config as _config_module  # noqa: E402
@@ -34,7 +37,6 @@ INVALID_API_KEY = "not-a-real-key"
 
 
 def _clear_store() -> None:
-    """Clear the in-memory session store."""
     sessions = getattr(session_store, "_sessions", None)
     lock = getattr(session_store, "_lock", None)
     if sessions is None or lock is None:
@@ -44,24 +46,17 @@ def _clear_store() -> None:
 
 
 def _clear_metrics() -> None:
-    """Reset all metrics counters, gauges, and histograms.
-
-    Reaches into the private module-level objects and clears them. This
-    is a test-only concern; production code never resets metrics.
-    """
     try:
         _metrics_module._counters._data.clear()
         _metrics_module._gauges._data.clear()
         _metrics_module._histograms._data.clear()
     except Exception:
-        # If the internal structure ever changes, tests should not crash
-        # in setup. Failing the test itself is a clearer signal.
         pass
 
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """Reset sessions and metrics before/after every test (autouse)."""
+    """Reset sessions, metrics, and audit state before/after each test."""
     _clear_store()
     _clear_metrics()
     yield
@@ -71,7 +66,6 @@ def _reset_state():
 
 @pytest.fixture()
 def client():
-    """A FastAPI TestClient bound to the app."""
     with TestClient(app) as c:
         yield c
 
