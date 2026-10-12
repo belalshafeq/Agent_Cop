@@ -12,18 +12,16 @@ from . import __version__
 from .config import settings
 from .exceptions import register_exception_handlers
 from .logging_config import configure_logging
+from .middleware import install_middleware
 from .routes import router
 
-# Install JSON logging before anything else emits a log line.
 configure_logging()
 logger = logging.getLogger("agenttrafficcop.main")
 
 
 def _custom_openapi(app: FastAPI):
-    """Inject a Bearer security scheme into the generated OpenAPI doc."""
     if app.openapi_schema:
         return app.openapi_schema
-
     schema = get_openapi(
         title=app.title,
         version=app.version,
@@ -45,12 +43,10 @@ def _custom_openapi(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Build and configure the FastAPI application."""
     docs_enabled = not settings.is_production
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # --- startup ---
         logger.info(
             "service_started version=%s env=%s auth_enabled=%s "
             "max_steps=%d max_repeated=%d max_cycle_len=%d",
@@ -62,11 +58,7 @@ def create_app() -> FastAPI:
             settings.max_cycle_length,
         )
         yield
-        # --- shutdown ---
-        logger.info(
-            "service_stopped active_sessions=%d",
-            settings.max_sessions,
-        )
+        logger.info("service_stopped")
 
     app = FastAPI(
         title="AgentTrafficCop",
@@ -82,16 +74,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    install_middleware(app)
     register_exception_handlers(app)
     app.include_router(router)
 
-    # Only install the OpenAPI customizer when docs are enabled —
-    # otherwise it just wastes memory building an unused schema.
     if docs_enabled:
         app.openapi = lambda: _custom_openapi(app)
 
     return app
 
 
-# Module-level app instance. Uvicorn imports this as `app.main:app`.
 app = create_app()

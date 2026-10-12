@@ -6,12 +6,13 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 
 from . import __version__
 from .circuit_breaker import evaluate
 from .hashing import payload_hash
+from .middleware import check_rate_limit
 from .schemas import AgentMessage, HealthResponse, RouteApproval
 from .security import verify_api_key
 from .state import session_store
@@ -28,18 +29,20 @@ router = APIRouter()
     summary="Evaluate and approve an inter-agent message.",
     responses={
         401: {"description": "Missing or invalid API key."},
-        422: {
-            "description": (
-                "Schema validation failed or the circuit breaker tripped."
-            )
-        },
+        413: {"description": "Request body too large."},
+        422: {"description": "Schema validation failed or breaker tripped."},
+        429: {"description": "Rate limit exceeded."},
     },
 )
 async def route_message(
+    request: Request,
     message: AgentMessage,
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> RouteApproval:
     """Governance checkpoint for a single agent-to-agent handoff."""
+    # Enforce rate limit before any real work.
+    await check_rate_limit(request)
+
     started = time.perf_counter()
 
     digest = payload_hash(message.payload)
@@ -75,12 +78,7 @@ async def route_message(
     summary="System health check.",
 )
 async def health() -> HealthResponse:
-    """Liveness/readiness probe. Intentionally unauthenticated.
-
-    Never raises. If the session backend is unreachable, we still
-    return 200 with active_sessions=0 and log the failure — because
-    a health check that 500s is not useful to an orchestrator.
-    """
+    """Liveness/readiness probe. Intentionally unauthenticated."""
     try:
         active = session_store.active_count()
     except Exception as e:

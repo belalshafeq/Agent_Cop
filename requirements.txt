@@ -1,6 +1,5 @@
 # ============================================================
 # AgentTrafficCop — Python dependencies
-# Install:  pip install -r requirements.txt
 # ============================================================
 
 # --- Web framework ---
@@ -8,16 +7,15 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 
 # --- Data validation ---
-# Must be >= 2.13 for Python 3.14 prebuilt wheels.
 pydantic>=2.13.0,<3.0.0
 
 # --- Environment variable loading ---
 python-dotenv==1.0.1
 
-# --- HTTP client (used by the SDK and demo) ---
+# --- HTTP client ---
 httpx==0.27.2
 
-# --- Redis backend (optional at runtime; required only if ATC_REDIS_URL is set) ---
+# --- Redis backend (optional; required only if ATC_REDIS_URL is set) ---
 redis>=5.0.0,<6.0.0
 
 # --- Testing ---

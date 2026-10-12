@@ -1,12 +1,4 @@
-"""Runtime configuration for AgentTrafficCop.
-
-All settings are read once at import time from environment variables
-(with safe defaults). Values are frozen in an immutable dataclass so
-they cannot be accidentally mutated at runtime.
-
-The `.env` file (if present) is loaded via python-dotenv. Secrets are
-NEVER hardcoded here and NEVER logged.
-"""
+"""Runtime configuration for AgentTrafficCop."""
 
 from __future__ import annotations
 
@@ -15,20 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Load .env if it exists. This is a no-op if the file is missing,
-# so it is safe to call in any environment (dev, Codespaces, prod).
+# Load .env if it exists.
 try:
     from dotenv import load_dotenv
 
     _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
     if _ENV_PATH.is_file():
         load_dotenv(dotenv_path=_ENV_PATH, override=False)
-except ImportError:  # pragma: no cover - dotenv is a hard dependency
+except ImportError:  # pragma: no cover
     pass
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
-    """Read an integer env var. Invalid values fall back to *default*."""
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
@@ -56,13 +46,6 @@ def _env_optional_str(name: str) -> Optional[str]:
 
 
 def _env_api_keys() -> Tuple[str, ...]:
-    """Parse the comma-separated ATC_API_KEYS env var.
-
-    Returns a tuple of non-empty, stripped keys. If no valid keys are
-    configured, returns an empty tuple — which means the API is
-    effectively LOCKED (all requests will be rejected). This is a
-    fail-closed design: no keys means no access.
-    """
     raw = os.getenv("ATC_API_KEYS", "")
     if not raw:
         return ()
@@ -89,17 +72,17 @@ class Settings:
     max_body_bytes: int = field(
         default_factory=lambda: _env_int("ATC_MAX_BODY_BYTES", 1_048_576)
     )
+    rate_limit_per_minute: int = field(
+        default_factory=lambda: _env_int("ATC_RATE_LIMIT_PER_MINUTE", 120)
+    )
 
     # --- Storage backend ---
-    # If set, the session store uses Redis. If unset, it uses in-memory.
     redis_url: Optional[str] = field(
         default_factory=lambda: _env_optional_str("ATC_REDIS_URL")
     )
-    # TTL for Redis sessions, in seconds. 0 = no expiry.
     redis_ttl_seconds: int = field(
         default_factory=lambda: _env_int("ATC_REDIS_TTL_SECONDS", 86_400)
     )
-    # Key prefix so multiple deployments can share one Redis DB.
     redis_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_REDIS_KEY_PREFIX", "atc:")
     )
@@ -130,14 +113,11 @@ class Settings:
 
     @property
     def auth_enabled(self) -> bool:
-        """Auth is active iff at least one API key is configured."""
         return len(self.api_keys) > 0
 
     @property
     def redis_enabled(self) -> bool:
-        """True iff a Redis URL was provided."""
         return bool(self.redis_url)
 
 
-# Module-level singleton. Import this everywhere.
 settings = Settings()

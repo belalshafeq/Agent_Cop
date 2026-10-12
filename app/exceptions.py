@@ -1,9 +1,4 @@
-"""Custom exceptions and FastAPI handlers for AgentTrafficCop.
-
-Governance violations raise `TrafficCopError` subclasses. The handlers
-registered here convert them into structured JSON responses with
-stable error codes and diagnostic details — never raw stack traces.
-"""
+"""Custom exceptions and FastAPI handlers for AgentTrafficCop."""
 
 from __future__ import annotations
 
@@ -50,35 +45,44 @@ class TrafficCopError(Exception):
 
 
 class SchemaValidationError(TrafficCopError):
-    """Raised when a message fails Pydantic validation."""
-
     status_code = 422
     error_code = "SCHEMA_VALIDATION_FAILED"
 
 
 class CircuitBreakerTripped(TrafficCopError):
-    """Base class for breaker trips (step limit, loop, cycle)."""
-
     status_code = 422
     error_code = "CIRCUIT_BREAKER_TRIPPED"
 
 
 class StepLimitExceeded(CircuitBreakerTripped):
-    """Session exceeded the maximum number of steps."""
-
     error_code = "STEP_LIMIT_EXCEEDED"
 
 
 class RepeatedPayloadLoop(CircuitBreakerTripped):
-    """Identical payload hash seen too many times in a row."""
-
     error_code = "REPEATED_PAYLOAD_LOOP"
 
 
 class CyclicPayloadLoop(CircuitBreakerTripped):
-    """A short repeating cycle (e.g. A -> B -> A -> B) was detected."""
-
     error_code = "CYCLIC_PAYLOAD_LOOP"
+
+
+class RateLimitError(TrafficCopError):
+    """Raised when a client exceeds the request rate limit."""
+
+    status_code = 429
+    error_code = "RATE_LIMIT_EXCEEDED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: int = 60,
+        session_id: str | None = None,
+        diagnostics: Dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, session_id=session_id, diagnostics=diagnostics)
+        self.retry_after = retry_after
+        self.diagnostics.setdefault("retry_after_seconds", retry_after)
 
 
 # ---------------------------------------------------------------------------
@@ -98,30 +102,29 @@ def register_exception_handlers(app: FastAPI) -> None:
             exc.error_code,
             exc.session_id,
         )
-        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+        headers = {}
+        if isinstance(exc, RateLimitError):
+            headers["Retry-After"] = str(exc.retry_after)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
+            headers=headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation(
         _request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        """Convert FastAPI's validation errors into our structured format.
-
-        FastAPI's RequestValidationError carries the raw body via
-        `exc.body` in most cases. We use it to extract the session_id
-        for diagnostic purposes, but never echo the full body back
-        (it could contain sensitive payloads).
-        """
         session_id: str | None = None
         body = getattr(exc, "body", None)
         if isinstance(body, dict):
             raw_sid = body.get("session_id")
             if isinstance(raw_sid, str):
-                session_id = raw_sid[:128]  # truncate defensively
+                session_id = raw_sid[:128]
 
         errors = []
         for err in exc.errors():
             loc = err.get("loc", [])
-            # Convert tuples to lists for JSON serialization.
             loc_list = [str(item) for item in loc]
             errors.append(
                 {
@@ -148,7 +151,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _handle_unexpected(
         _request: Request, exc: Exception
     ) -> JSONResponse:
-        """Last-resort handler — never leak stack traces to clients."""
         logger.exception("unhandled_exception")
         return JSONResponse(
             status_code=500,
