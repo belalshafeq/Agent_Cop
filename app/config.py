@@ -90,6 +90,14 @@ class Settings:
         default_factory=lambda: _env_str("ATC_METRICS_PATH", "/metrics")
     )
 
+    # --- Audit log ---
+    audit_log_enabled: bool = field(
+        default_factory=lambda: _env_bool("ATC_AUDIT_LOG_ENABLED", False)
+    )
+    audit_log_path: Optional[str] = field(
+        default_factory=lambda: _env_optional_str("ATC_AUDIT_LOG_PATH")
+    )
+
     # --- Storage backend ---
     redis_url: Optional[str] = field(
         default_factory=lambda: _env_optional_str("ATC_REDIS_URL")
@@ -132,6 +140,10 @@ class Settings:
     @property
     def redis_enabled(self) -> bool:
         return bool(self.redis_url)
+
+    @property
+    def audit_enabled(self) -> bool:
+        return self.audit_log_enabled and bool(self.audit_log_path)
 
 
 settings = Settings()
