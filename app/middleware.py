@@ -1,4 +1,4 @@
-"""HTTP-level protections: rate limiting and body size enforcement."""
+"""HTTP-level protections: metrics, rate limiting, and body size enforcement."""
 
 from __future__ import annotations
 
@@ -12,9 +12,55 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from . import metrics
 from .config import settings
 
 logger = logging.getLogger("agenttrafficcop.middleware")
+
+
+# ---------------------------------------------------------------------------
+# Metrics middleware
+# ---------------------------------------------------------------------------
+
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """Record request count and latency for every HTTP request.
+
+    Runs before any other middleware so it captures the full lifecycle,
+    including responses from the body-size limiter and error handlers.
+
+    Records:
+      * atc_requests_total{endpoint, method, status}  — counter
+      * atc_request_duration_seconds{endpoint}        — histogram
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        endpoint = request.url.path
+        method = request.method
+        started = time.perf_counter()
+
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        except Exception:
+            # Unhandled exception — record it as a 500, then re-raise.
+            duration = time.perf_counter() - started
+            try:
+                metrics.inc_request(endpoint, method, 500)
+                metrics.observe_latency(endpoint, duration)
+            except Exception:
+                pass
+            raise
+
+        duration = time.perf_counter() - started
+        try:
+            metrics.inc_request(endpoint, method, status_code)
+            metrics.observe_latency(endpoint, duration)
+        except Exception:
+            # Metrics must never break the request.
+            pass
+
+        return response
 
 
 # ---------------------------------------------------------------------------
@@ -43,20 +89,15 @@ class _SlidingWindowLimiter:
 
         Returns:
             (allowed, retry_after_seconds)
-            - allowed=True  → request is within the limit
-            - allowed=False → request is over the limit; retry_after is
-                              how many seconds until the next slot opens
         """
         now = time.monotonic()
         cutoff = now - self._window
         calls = self._calls[key]
 
-        # Drop timestamps outside the window.
         while calls and calls[0] < cutoff:
             calls.popleft()
 
         if len(calls) >= self._max:
-            # Rate limited. Compute when the oldest in-window call will expire.
             oldest = calls[0]
             retry_after = max(1, int(self._window - (now - oldest)) + 1)
             return False, retry_after
@@ -73,9 +114,6 @@ _limiter = _SlidingWindowLimiter(
 
 def _client_key(request: Request) -> str:
     """Identify the caller for rate-limiting purposes."""
-    # Prefer the immediate client IP. In production behind a trusted
-    # proxy, enable uvicorn's --proxy-headers so request.client reflects
-    # the real client.
     if request.client is not None:
         return request.client.host
     return "unknown"
@@ -84,8 +122,7 @@ def _client_key(request: Request) -> str:
 async def check_rate_limit(request: Request) -> None:
     """Enforce the rate limit for this request.
 
-    Raises a `RateLimitError` (a `TrafficCopError` subclass) when the
-    limit is exceeded. The exception handler converts it to a 429.
+    Raises `RateLimitError` when the limit is exceeded.
     """
     key = _client_key(request)
     allowed, retry_after = _limiter.check(key)
@@ -154,13 +191,26 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 def install_middleware(app: FastAPI) -> None:
-    """Wire HTTP-level protections into the app."""
+    """Wire HTTP-level protections into the app.
+
+    Order matters: FastAPI/Starlette applies middleware in reverse order
+    of `add_middleware` calls. The last one added runs first on the way
+    in. We want:
+      1. Metrics (outermost — sees everything, even rejected requests)
+      2. Body size (rejects oversized before reading)
+      3. Routes / handlers
+    """
+    # Added first → runs last
     app.add_middleware(
         BodySizeLimitMiddleware,
         max_bytes=settings.max_body_bytes,
     )
+    # Added second → runs first
+    app.add_middleware(MetricsMiddleware)
+
     logger.info(
-        "middleware_installed max_body_bytes=%d rate_limit_per_minute=%d",
+        "middleware_installed max_body_bytes=%d rate_limit_per_minute=%d metrics_enabled=%s",
         settings.max_body_bytes,
         settings.rate_limit_per_minute,
+        settings.metrics_enabled,
     )

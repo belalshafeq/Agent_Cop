@@ -41,7 +41,6 @@ async def route_message(
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> RouteApproval:
     """Governance checkpoint for a single agent-to-agent handoff."""
-    # Enforce rate limit before any real work.
     await check_rate_limit(request)
 
     started = time.perf_counter()
@@ -51,11 +50,10 @@ async def route_message(
     new_snapshot = evaluate(snapshot, digest)
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
-    elapsed_s = elapsed_ms / 1000.0
 
-    # Metrics
+    # Application-level metrics.
+    # (Request count and total latency are recorded by MetricsMiddleware.)
     metrics.inc_approved()
-    metrics.observe_latency("/v1/route", elapsed_s)
     try:
         metrics.set_active_sessions(session_store.active_count())
     except Exception:
@@ -100,8 +98,6 @@ async def health() -> HealthResponse:
     except Exception:
         uptime = 0.0
 
-    # Keep the gauge in sync every time health is probed (cheap, and the
-    # probe is typically called every few seconds).
     try:
         metrics.set_active_sessions(active)
     except Exception:
@@ -147,12 +143,7 @@ async def reset_session(
     summary="Prometheus metrics endpoint.",
 )
 async def metrics_endpoint() -> Response:
-    """Return all metrics in Prometheus text exposition format.
-
-    Unauthenticated by design — Prometheus scrapers typically don't
-    support Bearer auth, and metrics contain no sensitive data (only
-    aggregate counts and latencies).
-    """
+    """Return all metrics in Prometheus text exposition format."""
     if not settings.metrics_enabled:
         return PlainTextResponse(
             "# metrics disabled\n",
