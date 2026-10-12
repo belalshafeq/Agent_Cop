@@ -1,16 +1,10 @@
-"""Circuit breaker logic for step limits and loop detection.
-
-Given a session's current snapshot and the session store, this module
-decides whether to allow the step or raise a governance exception.
-
-The three checks run in a fixed order so the diagnostic that reaches
-the caller is the most specific one available.
-"""
+"""Circuit breaker logic for step limits and loop detection."""
 
 from __future__ import annotations
 
 import logging
 
+from . import metrics
 from .config import settings
 from .exceptions import (
     CyclicPayloadLoop,
@@ -24,20 +18,7 @@ logger = logging.getLogger("agenttrafficcop.breaker")
 
 
 def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
-    """Record the payload hash and enforce all governance thresholds.
-
-    Args:
-        snapshot:     The session's current state *before* this message.
-        payload_hash: SHA-256 of the incoming payload.
-
-    Returns:
-        The new session snapshot *after* recording the step.
-
-    Raises:
-        StepLimitExceeded: if the session has hit or exceeded max_steps.
-        RepeatedPayloadLoop: if the same hash repeats consecutively.
-        CyclicPayloadLoop: if a short repeating cycle is detected.
-    """
+    """Record the payload hash and enforce all governance thresholds."""
     # --- Check 1: hard step cap ------------------------------------------
     if snapshot.step >= settings.max_steps:
         logger.warning(
@@ -46,6 +27,10 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
             snapshot.step,
             settings.max_steps,
         )
+        try:
+            metrics.inc_trip("step_limit")
+        except Exception:
+            pass
         raise StepLimitExceeded(
             message=(
                 f"Session '{snapshot.session_id}' exceeded the maximum of "
@@ -59,7 +44,6 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
             },
         )
 
-    # Record the step via the backend. Returns a fresh snapshot.
     new_snapshot = session_store.record(snapshot.session_id, payload_hash)
 
     # --- Check 2: consecutive identical hashes ---------------------------
@@ -71,6 +55,10 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
             new_snapshot.step,
             repeats,
         )
+        try:
+            metrics.inc_trip("repeated_payload")
+        except Exception:
+            pass
         raise RepeatedPayloadLoop(
             message=(
                 f"Session '{new_snapshot.session_id}' produced identical "
@@ -96,6 +84,10 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
                 cycle_len,
                 repeats,
             )
+            try:
+                metrics.inc_trip("cyclic_payload")
+            except Exception:
+                pass
             raise CyclicPayloadLoop(
                 message=(
                     f"Session '{new_snapshot.session_id}' entered a "

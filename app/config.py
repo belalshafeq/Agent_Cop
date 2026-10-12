@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Load .env if it exists.
 try:
     from dotenv import load_dotenv
 
@@ -45,6 +44,13 @@ def _env_optional_str(name: str) -> Optional[str]:
     return raw.strip()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _env_api_keys() -> Tuple[str, ...]:
     raw = os.getenv("ATC_API_KEYS", "")
     if not raw:
@@ -74,6 +80,14 @@ class Settings:
     )
     rate_limit_per_minute: int = field(
         default_factory=lambda: _env_int("ATC_RATE_LIMIT_PER_MINUTE", 120)
+    )
+
+    # --- Observability ---
+    metrics_enabled: bool = field(
+        default_factory=lambda: _env_bool("ATC_METRICS_ENABLED", True)
+    )
+    metrics_path: str = field(
+        default_factory=lambda: _env_str("ATC_METRICS_PATH", "/metrics")
     )
 
     # --- Storage backend ---
