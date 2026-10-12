@@ -3,35 +3,42 @@
 Design:
   * Tests run in-process via FastAPI's TestClient — no real server.
   * The session backend is forced to in-memory for speed and isolation.
-  * Each test gets a fresh session store and a fresh TestClient.
-  * Auth is always configured with a known key so tests exercise the
-    real security path (not the fail-closed-without-keys path).
+    This override happens AFTER .env is loaded, so it wins over any
+    Redis configuration in .env.
+  * Each test gets a fresh in-memory store, so no cross-test leakage.
+  * Auth is always configured with a known key.
 """
 
 from __future__ import annotations
 
 import os
 
-import pytest
-
-# --- Environment setup -------------------------------------------------------
-# These must be set BEFORE importing app.* so that app.config.Settings
-# picks them up at import time. pytest loads conftest.py before collecting
-# test modules, so this runs first.
+# --- Environment setup (before any app import) -------------------------------
+# These must be set before importing app.* so that app.config picks them up.
+# NOTE: this is not enough on its own — app.config also loads .env via
+# python-dotenv, which can override these. We fix that below.
 os.environ["ATC_API_KEYS"] = "test-key-1,test-key-2"
 os.environ["ATC_ENV"] = "development"
 os.environ["ATC_LOG_LEVEL"] = "WARNING"
-# Force in-memory backend so tests don't need Redis running.
 os.environ.pop("ATC_REDIS_URL", None)
 
-# --- Imports after env setup -------------------------------------------------
+# --- Force in-memory backend at the Settings level ---------------------------
+# app.config loads .env on import, which may set ATC_REDIS_URL. We import
+# the config module, then forcibly clear redis_url on the frozen settings
+# instance. This is the only reliable way to override a value that dotenv
+# has already loaded.
+import app.config as _config_module  # noqa: E402
+
+object.__setattr__(_config_module.settings, "redis_url", None)
+
+# --- Now safe to import the app ----------------------------------------------
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 from app.state import session_store  # noqa: E402
 
-
-# --- Constants used by tests -------------------------------------------------
+# --- Constants ---------------------------------------------------------------
 
 VALID_API_KEY = "test-key-1"
 SECOND_API_KEY = "test-key-2"
@@ -41,36 +48,34 @@ INVALID_API_KEY = "not-a-real-key"
 # --- Fixtures ----------------------------------------------------------------
 
 
-@pytest.fixture()
-def client():
-    """A FastAPI TestClient bound to the app.
+def _clear_store() -> None:
+    """Clear the in-memory session store.
 
-    Fresh per test. Uses the app as-is; the app is already configured
-    by the environment variables set above.
+    Safe no-op if the backend is not InMemoryBackend (e.g. if someone
+    runs tests against Redis). In that case, tests must use fresh
+    session IDs to avoid leakage.
     """
-    with TestClient(app) as c:
-        yield c
+    sessions = getattr(session_store, "_sessions", None)
+    lock = getattr(session_store, "_lock", None)
+    if sessions is None or lock is None:
+        return
+    with lock:
+        sessions.clear()
 
 
 @pytest.fixture(autouse=True)
 def _reset_sessions():
-    """Reset the session store before and after every test.
-
-    Ensures no cross-test state leakage. autouse=True means this runs
-    automatically for every test without needing to be requested.
-    """
-    # Best-effort reset. InMemoryBackend exposes a private dict; we
-    # clear it via the public interface by popping all known sessions.
-    # (A cleaner reset method could be added to the backend later.)
-    if hasattr(session_store, "_sessions"):
-        with session_store._lock:  # type: ignore[attr-defined]
-            session_store._sessions.clear()  # type: ignore[attr-defined]
-
+    """Clear sessions before and after every test (autouse)."""
+    _clear_store()
     yield
+    _clear_store()
 
-    if hasattr(session_store, "_sessions"):
-        with session_store._lock:  # type: ignore[attr-defined]
-            session_store._sessions.clear()  # type: ignore[attr-defined]
+
+@pytest.fixture()
+def client():
+    """A FastAPI TestClient bound to the app."""
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture()
