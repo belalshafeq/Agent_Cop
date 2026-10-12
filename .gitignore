@@ -81,3 +81,8 @@ logs/
 *.spec
 pip-log.txt
 pip-delete-this-directory.txt
+
+# AgentTrafficCop runtime files
+audit.log
+audit.log.*
+*.audit.log
