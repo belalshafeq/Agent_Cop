@@ -1,32 +1,16 @@
-"""Shared pytest fixtures for the AgentTrafficCop test suite.
-
-Design:
-  * Tests run in-process via FastAPI's TestClient — no real server.
-  * The session backend is forced to in-memory for speed and isolation.
-    This override happens AFTER .env is loaded, so it wins over any
-    Redis configuration in .env.
-  * Each test gets a fresh in-memory store, so no cross-test leakage.
-  * Auth is always configured with a known key.
-"""
+"""Shared pytest fixtures for the AgentTrafficCop test suite."""
 
 from __future__ import annotations
 
 import os
 
 # --- Environment setup (before any app import) -------------------------------
-# These must be set before importing app.* so that app.config picks them up.
-# NOTE: this is not enough on its own — app.config also loads .env via
-# python-dotenv, which can override these. We fix that below.
 os.environ["ATC_API_KEYS"] = "test-key-1,test-key-2"
 os.environ["ATC_ENV"] = "development"
 os.environ["ATC_LOG_LEVEL"] = "WARNING"
 os.environ.pop("ATC_REDIS_URL", None)
 
 # --- Force in-memory backend at the Settings level ---------------------------
-# app.config loads .env on import, which may set ATC_REDIS_URL. We import
-# the config module, then forcibly clear redis_url on the frozen settings
-# instance. This is the only reliable way to override a value that dotenv
-# has already loaded.
 import app.config as _config_module  # noqa: E402
 
 object.__setattr__(_config_module.settings, "redis_url", None)
@@ -35,6 +19,7 @@ object.__setattr__(_config_module.settings, "redis_url", None)
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import metrics as _metrics_module  # noqa: E402
 from app.main import app  # noqa: E402
 from app.state import session_store  # noqa: E402
 
@@ -49,12 +34,7 @@ INVALID_API_KEY = "not-a-real-key"
 
 
 def _clear_store() -> None:
-    """Clear the in-memory session store.
-
-    Safe no-op if the backend is not InMemoryBackend (e.g. if someone
-    runs tests against Redis). In that case, tests must use fresh
-    session IDs to avoid leakage.
-    """
+    """Clear the in-memory session store."""
     sessions = getattr(session_store, "_sessions", None)
     lock = getattr(session_store, "_lock", None)
     if sessions is None or lock is None:
@@ -63,12 +43,30 @@ def _clear_store() -> None:
         sessions.clear()
 
 
+def _clear_metrics() -> None:
+    """Reset all metrics counters, gauges, and histograms.
+
+    Reaches into the private module-level objects and clears them. This
+    is a test-only concern; production code never resets metrics.
+    """
+    try:
+        _metrics_module._counters._data.clear()
+        _metrics_module._gauges._data.clear()
+        _metrics_module._histograms._data.clear()
+    except Exception:
+        # If the internal structure ever changes, tests should not crash
+        # in setup. Failing the test itself is a clearer signal.
+        pass
+
+
 @pytest.fixture(autouse=True)
-def _reset_sessions():
-    """Clear sessions before and after every test (autouse)."""
+def _reset_state():
+    """Reset sessions and metrics before/after every test (autouse)."""
     _clear_store()
+    _clear_metrics()
     yield
     _clear_store()
+    _clear_metrics()
 
 
 @pytest.fixture()
@@ -80,13 +78,11 @@ def client():
 
 @pytest.fixture()
 def auth_headers():
-    """Authorization header with a valid key."""
     return {"authorization": f"Bearer {VALID_API_KEY}"}
 
 
 @pytest.fixture()
 def sample_message():
-    """A valid AgentMessage payload as a dict."""
     return {
         "session_id": "test-session",
         "sender": "coder",
