@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .audit import audit
+
 logger = logging.getLogger("agenttrafficcop.exceptions")
 
 
@@ -105,6 +107,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         headers = {}
         if isinstance(exc, RateLimitError):
             headers["Retry-After"] = str(exc.retry_after)
+            try:
+                audit.log_rate_limited(
+                    path=str(_request.url.path),
+                    retry_after=exc.retry_after,
+                )
+            except Exception:
+                pass
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
@@ -133,6 +142,14 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "type": str(err.get("type", "")),
                 }
             )
+
+        try:
+            audit.log_schema_failed(
+                session_id=session_id,
+                error_count=len(errors),
+            )
+        except Exception:
+            pass
 
         payload = {
             "error": SchemaValidationError.error_code,

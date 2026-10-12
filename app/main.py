@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
+from .audit import audit
 from .config import settings
 from .exceptions import register_exception_handlers
 from .logging_config import configure_logging
@@ -49,15 +50,23 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         logger.info(
             "service_started version=%s env=%s auth_enabled=%s "
+            "audit_enabled=%s audit_path=%s "
             "max_steps=%d max_repeated=%d max_cycle_len=%d",
             __version__,
             settings.environment,
             settings.auth_enabled,
+            audit.enabled,
+            str(audit.path) if audit.path else None,
             settings.max_steps,
             settings.max_repeated_hashes,
             settings.max_cycle_length,
         )
         yield
+        logger.info("service_stopping")
+        try:
+            audit.close()
+        except Exception:
+            pass
         logger.info("service_stopped")
 
     app = FastAPI(

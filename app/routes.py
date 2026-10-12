@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import __version__, metrics
+from .audit import audit
 from .circuit_breaker import evaluate
 from .config import settings
 from .hashing import payload_hash
@@ -47,12 +48,16 @@ async def route_message(
 
     digest = payload_hash(message.payload)
     snapshot = session_store.get_or_create(message.session_id)
-    new_snapshot = evaluate(snapshot, digest)
+    new_snapshot = evaluate(
+        snapshot,
+        digest,
+        sender=message.sender,
+        recipient=message.recipient,
+        api_key_fingerprint=key_fingerprint,
+    )
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
 
-    # Application-level metrics.
-    # (Request count and total latency are recorded by MetricsMiddleware.)
     metrics.inc_approved()
     try:
         metrics.set_active_sessions(session_store.active_count())
@@ -118,7 +123,7 @@ async def health() -> HealthResponse:
 )
 async def reset_session(
     session_id: str,
-    _key_fingerprint: Annotated[str, Depends(verify_api_key)],
+    key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> JSONResponse:
     """Remove a session from the state engine."""
     removed = session_store.reset(session_id)
@@ -126,6 +131,16 @@ async def reset_session(
         metrics.set_active_sessions(session_store.active_count())
     except Exception:
         pass
+
+    try:
+        audit.log_reset(
+            session_id=session_id,
+            removed=removed,
+            api_key_fingerprint=key_fingerprint,
+        )
+    except Exception:
+        pass
+
     logger.info(
         "session_reset session_id=%s removed=%s",
         session_id,

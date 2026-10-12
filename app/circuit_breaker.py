@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from . import metrics
+from .audit import audit
 from .config import settings
 from .exceptions import (
     CyclicPayloadLoop,
@@ -17,8 +19,16 @@ from .state_backends import SessionSnapshot
 logger = logging.getLogger("agenttrafficcop.breaker")
 
 
-def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
+def evaluate(
+    snapshot: SessionSnapshot,
+    payload_hash: str,
+    *,
+    sender: Optional[str] = None,
+    recipient: Optional[str] = None,
+    api_key_fingerprint: Optional[str] = None,
+) -> SessionSnapshot:
     """Record the payload hash and enforce all governance thresholds."""
+
     # --- Check 1: hard step cap ------------------------------------------
     if snapshot.step >= settings.max_steps:
         logger.warning(
@@ -29,6 +39,21 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
         )
         try:
             metrics.inc_trip("step_limit")
+        except Exception:
+            pass
+        try:
+            audit.log_trip(
+                session_id=snapshot.session_id,
+                error_code="STEP_LIMIT_EXCEEDED",
+                step=snapshot.step,
+                sender=sender,
+                recipient=recipient,
+                diagnostics={
+                    "step": snapshot.step,
+                    "max_steps": settings.max_steps,
+                },
+                api_key_fingerprint=api_key_fingerprint,
+            )
         except Exception:
             pass
         raise StepLimitExceeded(
@@ -59,6 +84,22 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
             metrics.inc_trip("repeated_payload")
         except Exception:
             pass
+        try:
+            audit.log_trip(
+                session_id=new_snapshot.session_id,
+                error_code="REPEATED_PAYLOAD_LOOP",
+                step=new_snapshot.step,
+                sender=sender,
+                recipient=recipient,
+                diagnostics={
+                    "repeated_hash": payload_hash,
+                    "consecutive_repeats": repeats,
+                    "max_repeated_hashes": settings.max_repeated_hashes,
+                },
+                api_key_fingerprint=api_key_fingerprint,
+            )
+        except Exception:
+            pass
         raise RepeatedPayloadLoop(
             message=(
                 f"Session '{new_snapshot.session_id}' produced identical "
@@ -86,6 +127,22 @@ def evaluate(snapshot: SessionSnapshot, payload_hash: str) -> SessionSnapshot:
             )
             try:
                 metrics.inc_trip("cyclic_payload")
+            except Exception:
+                pass
+            try:
+                audit.log_trip(
+                    session_id=new_snapshot.session_id,
+                    error_code="CYCLIC_PAYLOAD_LOOP",
+                    step=new_snapshot.step,
+                    sender=sender,
+                    recipient=recipient,
+                    diagnostics={
+                        "cycle_length": cycle_len,
+                        "cycle_repeats": repeats,
+                        "max_cycle_repeats": settings.max_cycle_repeats,
+                    },
+                    api_key_fingerprint=api_key_fingerprint,
+                )
             except Exception:
                 pass
             raise CyclicPayloadLoop(
