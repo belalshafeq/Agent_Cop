@@ -1,0 +1,17 @@
+# ============================================================
+# AgentTrafficCop — repo-level tool configuration
+#
+# This file is NOT a Python package definition. It is tooling
+# config for tools that run at the repo level (pytest, mypy, etc.).
+#
+# The SDK is packaged separately — see sdk/pyproject.toml.
+# ============================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
