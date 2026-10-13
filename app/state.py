@@ -1,14 +1,4 @@
-"""Session store singleton.
-
-Thin wrapper around a pluggable `SessionBackend`. The backend is
-selected at import time based on configuration:
-
-  * If ATC_REDIS_URL is set, a RedisBackend is used.
-  * Otherwise, an InMemoryBackend is used.
-
-Everything else in the application imports `session_store` from here
-and does not know which backend is active.
-"""
+"""Session store singleton."""
 
 from __future__ import annotations
 
@@ -26,14 +16,7 @@ logger = logging.getLogger("agenttrafficcop.state")
 
 
 def _select_backend() -> SessionBackend:
-    """Choose a backend based on configuration.
-
-    If Redis is configured but unreachable, we retry a few times
-    (handled inside RedisBackend). If it still fails:
-      * In production: raise — fail loudly, do not silently degrade.
-      * In development: log and fall back to in-memory so local dev
-        is not blocked by a missing Redis.
-    """
+    """Choose a backend based on configuration."""
     if settings.redis_url:
         try:
             backend = RedisBackend(
@@ -54,19 +37,25 @@ def _select_backend() -> SessionBackend:
                 e,
             )
             if settings.is_production:
-                # In production, a misconfigured Redis is a fatal error.
-                # Silent fallback to in-memory would break the
-                # multi-replica guarantee without warning.
                 raise
             logger.warning(
                 "session_backend_falling_back backend=in_memory "
                 "reason=dev_mode"
             )
-    logger.info("session_backend_selected backend=in_memory")
-    return InMemoryBackend()
+
+    backend = InMemoryBackend(
+        max_sessions=settings.max_sessions,
+        ttl_seconds=settings.session_ttl_seconds,
+    )
+    logger.info(
+        "session_backend_selected backend=in_memory "
+        "max_sessions=%d session_ttl_seconds=%d",
+        settings.max_sessions,
+        settings.session_ttl_seconds,
+    )
+    return backend
 
 
-# Module-level singleton, used by routes and the circuit breaker.
 session_store: SessionBackend = _select_backend()
 
 __all__ = ["session_store", "SessionSnapshot", "SessionBackend"]

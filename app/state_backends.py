@@ -121,14 +121,46 @@ class _SessionRecord:
 
 
 class InMemoryBackend(SessionBackend):
-    def __init__(self, max_sessions: Optional[int] = None) -> None:
+    """Thread-safe, LRU-capped, in-memory backend.
+
+    If `ATC_SESSION_TTL_SECONDS` is greater than zero, sessions whose
+    `last_seen` timestamp is older than the TTL are treated as expired
+    on the next access. This is "lazy eviction" — memory is only freed
+    when the session is touched or evicted by the LRU cap.
+    """
+
+    def __init__(
+        self,
+        max_sessions: Optional[int] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> None:
         self._lock = threading.RLock()
         self._sessions: "OrderedDict[str, _SessionRecord]" = OrderedDict()
         self._max_sessions = max_sessions or settings.max_sessions
+        self._ttl = (
+            ttl_seconds if ttl_seconds is not None else settings.session_ttl_seconds
+        )
         self._started_at = time.time()
+
+    def _is_expired(self, rec: _SessionRecord, now: float) -> bool:
+        """Return True if the record is past its TTL."""
+        if self._ttl <= 0:
+            return False
+        return (now - rec.last_seen) > self._ttl
+
+    def _purge_expired(self, session_id: str, now: float) -> None:
+        """If the named session is expired, remove it. Called with lock held."""
+        rec = self._sessions.get(session_id)
+        if rec is None:
+            return
+        if self._is_expired(rec, now):
+            del self._sessions[session_id]
 
     def get_or_create(self, session_id: str) -> SessionSnapshot:
         with self._lock:
+            now = time.time()
+            self._purge_expired(session_id, now)
+
             rec = self._sessions.get(session_id)
             if rec is None:
                 rec = _SessionRecord(session_id=session_id)
@@ -139,8 +171,10 @@ class InMemoryBackend(SessionBackend):
             return rec.to_snapshot()
 
     def get(self, session_id: str) -> Optional[SessionSnapshot]:
-        """Return the session, or None if it doesn't exist. No side effects."""
+        """Return the session, or None if it doesn't exist or has expired."""
         with self._lock:
+            now = time.time()
+            self._purge_expired(session_id, now)
             rec = self._sessions.get(session_id)
             if rec is None:
                 return None
@@ -148,6 +182,9 @@ class InMemoryBackend(SessionBackend):
 
     def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:
         with self._lock:
+            now = time.time()
+            self._purge_expired(session_id, now)
+
             rec = self._sessions.get(session_id)
             if rec is None:
                 rec = _SessionRecord(session_id=session_id)
@@ -155,9 +192,10 @@ class InMemoryBackend(SessionBackend):
                 self._evict_if_needed()
             else:
                 self._sessions.move_to_end(session_id)
+
             rec.step += 1
             rec.hashes.append(payload_hash)
-            rec.last_seen = time.time()
+            rec.last_seen = now
             return rec.to_snapshot()
 
     def reset(self, session_id: str) -> bool:
@@ -165,6 +203,12 @@ class InMemoryBackend(SessionBackend):
             return self._sessions.pop(session_id, None) is not None
 
     def active_count(self) -> int:
+        """Return the number of retained sessions.
+
+        Note: expired-but-not-yet-purged sessions ARE counted. Lazy
+        eviction means the count can include dead sessions until they
+        are touched. This is a deliberate tradeoff for simplicity.
+        """
         with self._lock:
             return len(self._sessions)
 
@@ -172,8 +216,20 @@ class InMemoryBackend(SessionBackend):
         return time.time() - self._started_at
 
     def list_sessions(self) -> List[SessionSnapshot]:
+        """Return snapshots of every retained session.
+
+        Expired sessions are filtered out during iteration, but the
+        underlying records are not purged here (that would require a
+        write lock during a read-only operation). A subsequent access
+        to an expired session will purge it.
+        """
+        now = time.time()
         with self._lock:
-            return [rec.to_snapshot() for rec in self._sessions.values()]
+            results: List[SessionSnapshot] = []
+            for rec in self._sessions.values():
+                if not self._is_expired(rec, now):
+                    results.append(rec.to_snapshot())
+            return results
 
     def _evict_if_needed(self) -> None:
         while len(self._sessions) > self._max_sessions:
@@ -186,6 +242,8 @@ class InMemoryBackend(SessionBackend):
 
 
 class RedisBackend(SessionBackend):
+    """Redis-backed session store. (TTL handled by Redis EXPIRE.)"""
+
     def __init__(
         self,
         url: str,
@@ -250,7 +308,6 @@ class RedisBackend(SessionBackend):
         return self._k("sessions")
 
     def _read_snapshot(self, session_id: str) -> Optional[SessionSnapshot]:
-        """Read a session without creating one. Returns None if absent."""
         step_key = self._sk(session_id, "step")
         hashes_key = self._sk(session_id, "hashes")
         created_key = self._sk(session_id, "created")
@@ -305,7 +362,6 @@ class RedisBackend(SessionBackend):
         )
 
     def get(self, session_id: str) -> Optional[SessionSnapshot]:
-        """Return the session, or None if it doesn't exist. No side effects."""
         return self._read_snapshot(session_id)
 
     def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:

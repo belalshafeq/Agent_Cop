@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
     pass
 
 
-def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
@@ -65,7 +65,7 @@ class Settings:
 
     # --- Server ---
     host: str = field(default_factory=lambda: _env_str("ATC_HOST", "0.0.0.0"))
-    port: int = field(default_factory=lambda: _env_int("ATC_PORT", 8000))
+    port: int = field(default_factory=lambda: _env_int("ATC_PORT", 8000, minimum=1))
     environment: str = field(
         default_factory=lambda: _env_str("ATC_ENV", "development")
     )
@@ -76,10 +76,10 @@ class Settings:
     # --- Security ---
     api_keys: Tuple[str, ...] = field(default_factory=_env_api_keys)
     max_body_bytes: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_BODY_BYTES", 1_048_576)
+        default_factory=lambda: _env_int("ATC_MAX_BODY_BYTES", 1_048_576, minimum=1)
     )
     rate_limit_per_minute: int = field(
-        default_factory=lambda: _env_int("ATC_RATE_LIMIT_PER_MINUTE", 120)
+        default_factory=lambda: _env_int("ATC_RATE_LIMIT_PER_MINUTE", 120, minimum=1)
     )
 
     # --- Observability ---
@@ -103,30 +103,35 @@ class Settings:
         default_factory=lambda: _env_optional_str("ATC_REDIS_URL")
     )
     redis_ttl_seconds: int = field(
-        default_factory=lambda: _env_int("ATC_REDIS_TTL_SECONDS", 86_400)
+        default_factory=lambda: _env_int("ATC_REDIS_TTL_SECONDS", 86_400, minimum=1)
     )
     redis_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_REDIS_KEY_PREFIX", "atc:")
     )
+    # In-memory session TTL. 0 = disabled (sessions never expire except
+    # via LRU eviction). Opt-in for parity with Redis TTL.
+    session_ttl_seconds: int = field(
+        default_factory=lambda: _env_int("ATC_SESSION_TTL_SECONDS", 0, minimum=0)
+    )
 
     # --- Governance thresholds ---
     max_steps: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_STEPS", 25)
+        default_factory=lambda: _env_int("ATC_MAX_STEPS", 25, minimum=1)
     )
     max_repeated_hashes: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_REPEATED_HASHES", 3)
+        default_factory=lambda: _env_int("ATC_MAX_REPEATED_HASHES", 3, minimum=1)
     )
     max_cycle_length: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_CYCLE_LENGTH", 2)
+        default_factory=lambda: _env_int("ATC_MAX_CYCLE_LENGTH", 2, minimum=1)
     )
     max_cycle_repeats: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_CYCLE_REPEATS", 3)
+        default_factory=lambda: _env_int("ATC_MAX_CYCLE_REPEATS", 3, minimum=1)
     )
     history_window: int = field(
-        default_factory=lambda: _env_int("ATC_HISTORY_WINDOW", 16)
+        default_factory=lambda: _env_int("ATC_HISTORY_WINDOW", 16, minimum=1)
     )
     max_sessions: int = field(
-        default_factory=lambda: _env_int("ATC_MAX_SESSIONS", 10_000)
+        default_factory=lambda: _env_int("ATC_MAX_SESSIONS", 10_000, minimum=1)
     )
 
     @property
@@ -144,6 +149,10 @@ class Settings:
     @property
     def audit_enabled(self) -> bool:
         return self.audit_log_enabled and bool(self.audit_log_path)
+
+    @property
+    def ttl_enabled(self) -> bool:
+        return self.session_ttl_seconds > 0
 
 
 settings = Settings()
