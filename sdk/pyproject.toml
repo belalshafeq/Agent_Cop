@@ -1,10 +1,5 @@
 # ============================================================
 # AgentTrafficCop SDK — packaging config
-#
-# Install for development:    pip install -e ./sdk
-# Install with LangGraph:     pip install -e "./sdk[langgraph]"
-# Install for use:            pip install ./sdk
-# Build a wheel:              python -m build ./sdk
 # ============================================================
 
 [build-system]
@@ -69,6 +64,3 @@ package-dir = { "" = "." }
 
 [tool.setuptools.package-data]
 agenttrafficcop = ["py.typed"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
