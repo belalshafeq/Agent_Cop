@@ -458,6 +458,125 @@ The audit log **never blocks a request**. If the file can't be written
 logged to stderr and the request proceeds. Governance is always more
 important than record-keeping.
 
+## Admin API
+
+Three endpoints for inspecting and managing active sessions.
+All require Bearer authentication.
+
+### `GET /v1/sessions`
+
+List every active session, sorted by most-recently-active.
+
+```bash
+curl "http://localhost:8000/v1/sessions" \
+  -H "authorization: Bearer $ATC_KEY"
+```
+
+Response:
+
+```json
+{
+  "total": 47,
+  "returned": 47,
+  "sessions": [
+    {
+      "session_id": "run-42",
+      "step": 8,
+      "hash_count": 8,
+      "created_at": 1791793600.00,
+      "last_seen": 1791793800.00,
+      "age_seconds": 200.5,
+      "idle_seconds": 0.5
+    }
+  ]
+}
+```
+
+**Query parameters:**
+
+| Param | Default | Meaning |
+|---|---|---|
+| `limit` | 100 | Maximum sessions to return (1–10,000) |
+| `offset` | 0 | Pagination offset |
+| `min_step` | (none) | Only return sessions with `step >= min_step`. Useful for finding potentially stuck sessions. |
+
+**Example — find sessions that have run more than 5 steps:**
+
+```bash
+curl "http://localhost:8000/v1/sessions?min_step=5" \
+  -H "authorization: Bearer $ATC_KEY"
+```
+
+### `GET /v1/sessions/{session_id}`
+
+Return a single session's full state, including the recent payload hashes.
+
+```bash
+curl "http://localhost:8000/v1/sessions/run-42" \
+  -H "authorization: Bearer $ATC_KEY"
+```
+
+Response:
+
+```json
+{
+  "session_id": "run-42",
+  "step": 8,
+  "hash_count": 8,
+  "hashes": ["a3f9...", "b8e2...", "a3f9...", "b8e2...", "..."],
+  "created_at": 1791793600.00,
+  "last_seen": 1791793800.00,
+  "age_seconds": 200.5,
+  "idle_seconds": 0.5
+}
+```
+
+**The hash list is what you inspect when diagnosing a loop.** For an A↔B ping-pong, you'll see the same two hashes alternating.
+
+Returns **404** if the session doesn't exist. Read-only — calling this endpoint never creates a session.
+
+### `POST /v1/admin/cleanup`
+
+Expire every session whose `last_seen` is older than `older_than_seconds`.
+
+```bash
+curl -X POST "http://localhost:8000/v1/admin/cleanup" \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $ATC_KEY" \
+  -d '{"older_than_seconds": 3600}'
+```
+
+Response:
+
+```json
+{"expired": 12, "remaining": 35}
+```
+
+Every expired session is also written to the audit log as a `reset` event.
+
+**Typical usage:** run as a cron job every hour to enforce a maximum session age.
+
+```bash
+# Cleanup script — run from cron
+curl -s -X POST http://your-host:8000/v1/admin/cleanup \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $ATC_KEY" \
+  -d '{"older_than_seconds": 86400}'
+```
+
+### Why these endpoints exist
+
+- **Support engineers:** "Which session is stuck?" → `GET /v1/sessions?min_step=10`
+- **Ops:** "Free memory before a load test" → `POST /v1/admin/cleanup`
+- **Debugging:** "What's actually in memory right now?" → `GET /v1/sessions`
+- **Diagnosis:** "What payloads are cycling?" → `GET /v1/sessions/{id}` and look at the hashes
+
+### What's NOT exposed
+
+- **Session payloads.** Only their SHA-256 hashes. Raw payloads are never stored.
+- **Session ownership.** Anyone with a valid API key can list and inspect every session.
+- **Cross-tenant isolation.** One namespace for all sessions. Multi-tenancy is a future feature.
+
 ## Docker Deployment
 
 Two compose files ship with this repo, for two different environments.
