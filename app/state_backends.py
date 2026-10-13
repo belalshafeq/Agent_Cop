@@ -10,7 +10,6 @@ know or care which is active.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -31,12 +30,7 @@ logger = logging.getLogger("agenttrafficcop.state.backends")
 
 @dataclass(frozen=True)
 class SessionSnapshot:
-    """Read-only view of a session.
-
-    Returned by backends on every operation. The circuit breaker and
-    routes consume this — they never mutate it. Mutation happens only
-    through backend methods, which return a *new* snapshot.
-    """
+    """Read-only view of a session."""
 
     session_id: str
     step: int
@@ -103,6 +97,15 @@ class SessionBackend(ABC):
     @abstractmethod
     def uptime_seconds(self) -> float: ...
 
+    @abstractmethod
+    def list_sessions(self) -> List[SessionSnapshot]:
+        """Return a snapshot of every active session.
+
+        Ordering is backend-specific and not guaranteed. Callers that
+        need ordering should sort the result themselves.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation
@@ -130,11 +133,7 @@ class _SessionRecord:
 
 
 class InMemoryBackend(SessionBackend):
-    """Thread-safe, LRU-capped, in-memory backend.
-
-    Sessions live in this process only — they do not survive a restart
-    and are not shared across replicas.
-    """
+    """Thread-safe, LRU-capped, in-memory backend."""
 
     def __init__(self, max_sessions: Optional[int] = None) -> None:
         self._lock = threading.RLock()
@@ -179,6 +178,14 @@ class InMemoryBackend(SessionBackend):
     def uptime_seconds(self) -> float:
         return time.time() - self._started_at
 
+    def list_sessions(self) -> List[SessionSnapshot]:
+        """Return a snapshot of every retained session.
+
+        Ordered by insertion (oldest first). Safe to call concurrently.
+        """
+        with self._lock:
+            return [rec.to_snapshot() for rec in self._sessions.values()]
+
     def _evict_if_needed(self) -> None:
         while len(self._sessions) > self._max_sessions:
             self._sessions.popitem(last=False)
@@ -194,10 +201,6 @@ class RedisBackend(SessionBackend):
 
     Requires the `redis` Python package. Instantiated only when
     `settings.redis_url` is set.
-
-    The backend retries the initial connection with backoff so a
-    container-DNS race (server starting before Redis is DNS-resolvable)
-    does not kill the process.
     """
 
     def __init__(
@@ -344,7 +347,6 @@ class RedisBackend(SessionBackend):
         """Return the number of tracked sessions.
 
         Fails soft: if Redis is unreachable, returns 0 rather than raising.
-        A health probe should never crash the server.
         """
         try:
             return int(self._redis.scard(self._sessions_set()))
@@ -354,6 +356,32 @@ class RedisBackend(SessionBackend):
 
     def uptime_seconds(self) -> float:
         return time.time() - self._started_at
+
+    def list_sessions(self) -> List[SessionSnapshot]:
+        """Return a snapshot of every session in Redis.
+
+        Uses SMEMBERS to get session IDs, then pipelines get_or_create
+        for each. Complexity is O(N) Redis round trips, which is fine
+        for the sizes this is designed for (< 100K sessions).
+        """
+        try:
+            ids = self._redis.smembers(self._sessions_set())
+        except Exception as e:
+            logger.warning("redis_list_sessions_failed error=%s", e)
+            return []
+
+        snapshots: List[SessionSnapshot] = []
+        for session_id in ids:
+            try:
+                snapshots.append(self.get_or_create(session_id))
+            except Exception as e:
+                # Skip sessions that vanish mid-iteration.
+                logger.warning(
+                    "redis_list_sessions_skip session_id=%s error=%s",
+                    session_id,
+                    e,
+                )
+        return snapshots
 
     # --- Internals ---------------------------------------------------------
 

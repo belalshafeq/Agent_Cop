@@ -1,13 +1,8 @@
-"""Pydantic v2 strict data contracts for AgentTrafficCop.
-
-These schemas form the governance shield: any payload that fails
-validation is rejected with a structured HTTP 422 response *before*
-it can reach a downstream agent.
-"""
+"""Pydantic v2 strict data contracts for AgentTrafficCop."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -24,20 +19,14 @@ ALLOWED_INTENTS = (
     "error",
 )
 
+
 # ---------------------------------------------------------------------------
 # Incoming: agent-to-agent message
 # ---------------------------------------------------------------------------
 
 
 class AgentMessage(BaseModel):
-    """A single agent-to-agent handoff message.
-
-    Strict mode:
-      * Unknown fields are rejected (extra="forbid").
-      * All core fields are required.
-      * Strings are stripped of surrounding whitespace.
-      * Field lengths are bounded to prevent memory abuse.
-    """
+    """A single agent-to-agent handoff message."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -46,24 +35,9 @@ class AgentMessage(BaseModel):
         frozen=False,
     )
 
-    session_id: str = Field(
-        ...,
-        min_length=1,
-        max_length=128,
-        description="Unique identifier for the execution session / graph run.",
-    )
-    sender: str = Field(
-        ...,
-        min_length=1,
-        max_length=64,
-        description="Identifier of the emitting agent.",
-    )
-    recipient: str = Field(
-        ...,
-        min_length=1,
-        max_length=64,
-        description="Identifier of the target agent.",
-    )
+    session_id: str = Field(..., min_length=1, max_length=128)
+    sender: str = Field(..., min_length=1, max_length=64)
+    recipient: str = Field(..., min_length=1, max_length=64)
     intent: Literal[
         "request",
         "response",
@@ -71,20 +45,9 @@ class AgentMessage(BaseModel):
         "tool_call",
         "tool_result",
         "error",
-    ] = Field(
-        ...,
-        description="Semantic intent of the message.",
-    )
-    payload: Dict[str, Any] = Field(
-        ...,
-        description="Structured payload handed off between agents.",
-    )
-    metadata: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Optional non-semantic metadata (trace ids, tags).",
-    )
-
-    # --- Validators ---------------------------------------------------------
+    ] = Field(...)
+    payload: Dict[str, Any] = Field(...)
+    metadata: Optional[Dict[str, Any]] = Field(default=None)
 
     @field_validator("payload")
     @classmethod
@@ -103,8 +66,6 @@ class AgentMessage(BaseModel):
     @field_validator("sender", "recipient")
     @classmethod
     def _no_self_handoff(cls, v: str, info) -> str:
-        # Cross-field check: reject sender == recipient. We use the
-        # already-validated sibling value from `info.data` when available.
         other = info.data.get("sender") if info.field_name == "recipient" else None
         if info.field_name == "recipient" and other is not None and v == other:
             raise ValueError("sender and recipient must differ")
@@ -117,7 +78,7 @@ class AgentMessage(BaseModel):
 
 
 class RouteApproval(BaseModel):
-    """Successful routing decision returned by the middleware."""
+    """Successful routing decision."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -143,3 +104,84 @@ class HealthResponse(BaseModel):
     version: str
     active_sessions: int = Field(..., ge=0)
     uptime_seconds: float = Field(..., ge=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Admin API: session inspection
+# ---------------------------------------------------------------------------
+
+
+class SessionSummary(BaseModel):
+    """Summary row for one session, as returned by GET /v1/sessions.
+
+    Deliberately does NOT include the payload hash history — that can be
+    large, and listing should be cheap.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    step: int = Field(..., ge=0)
+    hash_count: int = Field(..., ge=0)
+    created_at: float = Field(..., ge=0.0)
+    last_seen: float = Field(..., ge=0.0)
+    age_seconds: float = Field(..., ge=0.0)
+    idle_seconds: float = Field(..., ge=0.0)
+
+
+class SessionListResponse(BaseModel):
+    """Response for GET /v1/sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(..., ge=0)
+    returned: int = Field(..., ge=0)
+    sessions: List[SessionSummary]
+
+
+class SessionDetailResponse(BaseModel):
+    """Response for GET /v1/sessions/{id}.
+
+    Includes the recent payload hashes for that session so an operator
+    can see the loop pattern without touching the raw store.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    step: int = Field(..., ge=0)
+    hash_count: int = Field(..., ge=0)
+    hashes: List[str]
+    created_at: float = Field(..., ge=0.0)
+    last_seen: float = Field(..., ge=0.0)
+    age_seconds: float = Field(..., ge=0.0)
+    idle_seconds: float = Field(..., ge=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Admin API: cleanup
+# ---------------------------------------------------------------------------
+
+
+class CleanupRequest(BaseModel):
+    """Request body for POST /v1/admin/cleanup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    older_than_seconds: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "Sessions whose `last_seen` is older than this many seconds "
+            "will be expired."
+        ),
+    )
+
+
+class CleanupResponse(BaseModel):
+    """Response for POST /v1/admin/cleanup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expired: int = Field(..., ge=0)
+    remaining: int = Field(..., ge=0)
