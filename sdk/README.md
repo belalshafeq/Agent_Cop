@@ -1,28 +1,4 @@
-# agenttrafficcop (Python SDK)
-
-A thin, typed async client for the [AgentTrafficCop](../README.md)
-governance middleware.
-
-- **Async-first** — no blocking calls, no sync/async confusion.
-- **Typed exceptions** — catch `LoopDetected`, not `HTTP 422`.
-- **Connection pooling** — one `httpx.AsyncClient` per `Guard` instance,
-  safely reused across nested event loops.
-- **No surprises** — the SDK mirrors the server's contracts exactly.
-- **LangGraph adapter** — wrap any node in one line.
-
-## Install
-
-```bash
-pip install -e ./sdk
-```
-
-With LangGraph support:
-
-```bash
-pip install -e "./sdk[langgraph]"
-```
-
-(Once this repo is published, `pip install agenttrafficcop` will also work.)
+pip install "agenttrafficcop[langgraph]"
 
 ## Quick Start
 
