@@ -229,9 +229,13 @@ async def get_session(
     session_id: str,
     _key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> SessionDetailResponse:
-    """Return the full state of one session, including hash history."""
+    """Return the full state of one session, including hash history.
+
+    Returns 404 if the session doesn't exist. Never creates a session
+    as a side effect — read-only endpoints must not mutate state.
+    """
     try:
-        snapshot = session_store.get_or_create(session_id)
+        snapshot = session_store.get(session_id)
     except Exception as e:
         logger.error("get_session_failed session_id=%s error=%s", session_id, e)
         raise HTTPException(
@@ -239,17 +243,7 @@ async def get_session(
             detail={"error": "SESSION_LOOKUP_FAILED"},
         )
 
-    # A freshly-created empty session has step=0 and no hashes. If the
-    # caller asked for a session that doesn't exist, we don't want to
-    # silently create one. Compare against a clean check.
-    if snapshot.step == 0 and not snapshot.hashes:
-        # It's either new or never existed. Return 404 to avoid
-        # accidentally creating phantom sessions.
-        # But we must check whether it existed before get_or_create.
-        # Simplest approach: use the underlying store's own existence
-        # check by asking for it after we've already created it — a
-        # miss means it was just created with this call.
-        # We can detect this by re-fetching; if still empty, treat as 404.
+    if snapshot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -270,7 +264,6 @@ async def get_session(
         age_seconds=max(0.0, now - snapshot.created_at),
         idle_seconds=max(0.0, now - snapshot.last_seen),
     )
-
 
 # ---------------------------------------------------------------------------
 # Admin: bulk cleanup

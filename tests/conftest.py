@@ -9,7 +9,6 @@ os.environ["ATC_API_KEYS"] = "test-key-1,test-key-2"
 os.environ["ATC_ENV"] = "development"
 os.environ["ATC_LOG_LEVEL"] = "WARNING"
 os.environ.pop("ATC_REDIS_URL", None)
-# Disable audit logging by default; individual tests enable it explicitly.
 os.environ.pop("ATC_AUDIT_LOG_ENABLED", None)
 os.environ.pop("ATC_AUDIT_LOG_PATH", None)
 
@@ -33,10 +32,11 @@ SECOND_API_KEY = "test-key-2"
 INVALID_API_KEY = "not-a-real-key"
 
 
-# --- Fixtures ----------------------------------------------------------------
+# --- Reset helpers -----------------------------------------------------------
 
 
 def _clear_store() -> None:
+    """Clear the in-memory session store."""
     sessions = getattr(session_store, "_sessions", None)
     lock = getattr(session_store, "_lock", None)
     if sessions is None or lock is None:
@@ -46,6 +46,7 @@ def _clear_store() -> None:
 
 
 def _clear_metrics() -> None:
+    """Reset all metrics counters, gauges, and histograms."""
     try:
         _metrics_module._counters._data.clear()
         _metrics_module._gauges._data.clear()
@@ -54,29 +55,61 @@ def _clear_metrics() -> None:
         pass
 
 
+def _clear_rate_limiter() -> None:
+    """Reset the in-process rate limiter's call history.
+
+    Test-only concern. Reaches into the module-level limiter and clears
+    its per-client deques so tests don't accumulate usage against each
+    other.
+    """
+    try:
+        import app.middleware as mw
+        limiter = getattr(mw, "_limiter", None)
+        if limiter is None:
+            return
+        calls = getattr(limiter, "_calls", None)
+        if calls is None:
+            return
+        calls.clear()
+    except Exception:
+        pass
+
+
+# --- Fixtures ----------------------------------------------------------------
+
+
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """Reset sessions, metrics, and audit state before/after each test."""
+    """Reset sessions, metrics, and the rate limiter before/after each test.
+
+    autouse=True means this runs automatically for every test without
+    needing to be requested.
+    """
     _clear_store()
     _clear_metrics()
+    _clear_rate_limiter()
     yield
     _clear_store()
     _clear_metrics()
+    _clear_rate_limiter()
 
 
 @pytest.fixture()
 def client():
+    """A FastAPI TestClient bound to the app."""
     with TestClient(app) as c:
         yield c
 
 
 @pytest.fixture()
 def auth_headers():
+    """Authorization header with a valid key."""
     return {"authorization": f"Bearer {VALID_API_KEY}"}
 
 
 @pytest.fixture()
 def sample_message():
+    """A valid AgentMessage payload as a dict."""
     return {
         "session_id": "test-session",
         "sender": "coder",

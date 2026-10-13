@@ -1,12 +1,4 @@
-"""Pluggable session storage backends for AgentTrafficCop.
-
-Two backends ship:
-  * InMemoryBackend — default; process-local; lost on restart.
-  * RedisBackend    — shared; survives restarts; scales horizontally.
-
-Both implement `SessionBackend`. The rest of the application does not
-know or care which is active.
-"""
+"""Pluggable session storage backends for AgentTrafficCop."""
 
 from __future__ import annotations
 
@@ -24,7 +16,7 @@ logger = logging.getLogger("agenttrafficcop.state.backends")
 
 
 # ---------------------------------------------------------------------------
-# Snapshot: an immutable view of a session's state
+# Snapshot
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +31,6 @@ class SessionSnapshot:
     last_seen: float
 
     def consecutive_repeats(self) -> int:
-        """Length of the trailing run of identical hashes."""
         if not self.hashes:
             return 0
         last = self.hashes[-1]
@@ -52,15 +43,12 @@ class SessionSnapshot:
         return count
 
     def cycle_repeats(self, cycle_length: int) -> int:
-        """How many full trailing cycles of *cycle_length* exist."""
         if cycle_length <= 0 or len(self.hashes) < cycle_length * 2:
             return 0
-
         pattern = self.hashes[-cycle_length:]
         prev = self.hashes[-2 * cycle_length : -cycle_length]
         if prev != pattern:
             return 0
-
         repeats = 2
         idx = len(self.hashes) - 2 * cycle_length
         while idx - cycle_length >= 0:
@@ -79,11 +67,17 @@ class SessionSnapshot:
 
 
 class SessionBackend(ABC):
-    """Abstract session storage backend. Implementations must be safe
-    for concurrent use."""
-
     @abstractmethod
     def get_or_create(self, session_id: str) -> SessionSnapshot: ...
+
+    @abstractmethod
+    def get(self, session_id: str) -> Optional[SessionSnapshot]:
+        """Return the session's snapshot, or None if it doesn't exist.
+
+        Unlike get_or_create, this MUST NOT create a session as a side
+        effect. Used by read-only endpoints like GET /v1/sessions/{id}.
+        """
+        ...
 
     @abstractmethod
     def record(self, session_id: str, payload_hash: str) -> SessionSnapshot: ...
@@ -98,13 +92,7 @@ class SessionBackend(ABC):
     def uptime_seconds(self) -> float: ...
 
     @abstractmethod
-    def list_sessions(self) -> List[SessionSnapshot]:
-        """Return a snapshot of every active session.
-
-        Ordering is backend-specific and not guaranteed. Callers that
-        need ordering should sort the result themselves.
-        """
-        ...
+    def list_sessions(self) -> List[SessionSnapshot]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +121,6 @@ class _SessionRecord:
 
 
 class InMemoryBackend(SessionBackend):
-    """Thread-safe, LRU-capped, in-memory backend."""
-
     def __init__(self, max_sessions: Optional[int] = None) -> None:
         self._lock = threading.RLock()
         self._sessions: "OrderedDict[str, _SessionRecord]" = OrderedDict()
@@ -152,6 +138,14 @@ class InMemoryBackend(SessionBackend):
                 self._sessions.move_to_end(session_id)
             return rec.to_snapshot()
 
+    def get(self, session_id: str) -> Optional[SessionSnapshot]:
+        """Return the session, or None if it doesn't exist. No side effects."""
+        with self._lock:
+            rec = self._sessions.get(session_id)
+            if rec is None:
+                return None
+            return rec.to_snapshot()
+
     def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:
         with self._lock:
             rec = self._sessions.get(session_id)
@@ -161,7 +155,6 @@ class InMemoryBackend(SessionBackend):
                 self._evict_if_needed()
             else:
                 self._sessions.move_to_end(session_id)
-
             rec.step += 1
             rec.hashes.append(payload_hash)
             rec.last_seen = time.time()
@@ -179,10 +172,6 @@ class InMemoryBackend(SessionBackend):
         return time.time() - self._started_at
 
     def list_sessions(self) -> List[SessionSnapshot]:
-        """Return a snapshot of every retained session.
-
-        Ordered by insertion (oldest first). Safe to call concurrently.
-        """
         with self._lock:
             return [rec.to_snapshot() for rec in self._sessions.values()]
 
@@ -197,12 +186,6 @@ class InMemoryBackend(SessionBackend):
 
 
 class RedisBackend(SessionBackend):
-    """Redis-backed session store.
-
-    Requires the `redis` Python package. Instantiated only when
-    `settings.redis_url` is set.
-    """
-
     def __init__(
         self,
         url: str,
@@ -226,9 +209,7 @@ class RedisBackend(SessionBackend):
         for attempt in range(1, connect_retries + 1):
             try:
                 self._redis.ping()
-                logger.info(
-                    "redis_connected attempt=%d url=%s", attempt, url
-                )
+                logger.info("redis_connected attempt=%d url=%s", attempt, url)
                 break
             except (
                 redis.exceptions.ConnectionError,
@@ -259,8 +240,6 @@ class RedisBackend(SessionBackend):
         self._started_at = time.time()
         self._history_window = settings.history_window
 
-    # --- Key helpers -------------------------------------------------------
-
     def _k(self, suffix: str) -> str:
         return f"{self._prefix}{suffix}"
 
@@ -270,9 +249,8 @@ class RedisBackend(SessionBackend):
     def _sessions_set(self) -> str:
         return self._k("sessions")
 
-    # --- Interface ---------------------------------------------------------
-
-    def get_or_create(self, session_id: str) -> SessionSnapshot:
+    def _read_snapshot(self, session_id: str) -> Optional[SessionSnapshot]:
+        """Read a session without creating one. Returns None if absent."""
         step_key = self._sk(session_id, "step")
         hashes_key = self._sk(session_id, "hashes")
         created_key = self._sk(session_id, "created")
@@ -285,15 +263,10 @@ class RedisBackend(SessionBackend):
         pipe.get(seen_key)
         step_raw, hashes_raw, created_raw, seen_raw = pipe.execute()
 
-        now = time.time()
-
         if step_raw is None and created_raw is None:
-            created_set = self._redis.set(created_key, f"{now}", nx=True)
-            if created_set:
-                self._redis.sadd(self._sessions_set(), session_id)
-                self._apply_ttl(step_key, hashes_key, created_key, seen_key)
-            created_raw = self._redis.get(created_key)
+            return None
 
+        now = time.time()
         step = int(step_raw) if step_raw is not None else 0
         hashes = list(reversed(hashes_raw)) if hashes_raw else []
         created = float(created_raw) if created_raw else now
@@ -306,6 +279,34 @@ class RedisBackend(SessionBackend):
             created_at=created,
             last_seen=seen,
         )
+
+    def get_or_create(self, session_id: str) -> SessionSnapshot:
+        snap = self._read_snapshot(session_id)
+        if snap is not None:
+            return snap
+
+        now = time.time()
+        step_key = self._sk(session_id, "step")
+        hashes_key = self._sk(session_id, "hashes")
+        created_key = self._sk(session_id, "created")
+        seen_key = self._sk(session_id, "seen")
+
+        created_set = self._redis.set(created_key, f"{now}", nx=True)
+        if created_set:
+            self._redis.sadd(self._sessions_set(), session_id)
+            self._apply_ttl(step_key, hashes_key, created_key, seen_key)
+
+        return SessionSnapshot(
+            session_id=session_id,
+            step=0,
+            hashes=[],
+            created_at=now,
+            last_seen=now,
+        )
+
+    def get(self, session_id: str) -> Optional[SessionSnapshot]:
+        """Return the session, or None if it doesn't exist. No side effects."""
+        return self._read_snapshot(session_id)
 
     def record(self, session_id: str, payload_hash: str) -> SessionSnapshot:
         step_key = self._sk(session_id, "step")
@@ -344,10 +345,6 @@ class RedisBackend(SessionBackend):
         return existed
 
     def active_count(self) -> int:
-        """Return the number of tracked sessions.
-
-        Fails soft: if Redis is unreachable, returns 0 rather than raising.
-        """
         try:
             return int(self._redis.scard(self._sessions_set()))
         except Exception as e:
@@ -358,12 +355,6 @@ class RedisBackend(SessionBackend):
         return time.time() - self._started_at
 
     def list_sessions(self) -> List[SessionSnapshot]:
-        """Return a snapshot of every session in Redis.
-
-        Uses SMEMBERS to get session IDs, then pipelines get_or_create
-        for each. Complexity is O(N) Redis round trips, which is fine
-        for the sizes this is designed for (< 100K sessions).
-        """
         try:
             ids = self._redis.smembers(self._sessions_set())
         except Exception as e:
@@ -373,17 +364,16 @@ class RedisBackend(SessionBackend):
         snapshots: List[SessionSnapshot] = []
         for session_id in ids:
             try:
-                snapshots.append(self.get_or_create(session_id))
+                snap = self.get(session_id)
+                if snap is not None:
+                    snapshots.append(snap)
             except Exception as e:
-                # Skip sessions that vanish mid-iteration.
                 logger.warning(
                     "redis_list_sessions_skip session_id=%s error=%s",
                     session_id,
                     e,
                 )
         return snapshots
-
-    # --- Internals ---------------------------------------------------------
 
     def _apply_ttl(self, *keys: str) -> None:
         if self._ttl <= 0:
