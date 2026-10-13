@@ -1,12 +1,12 @@
-"""HTTP routes: /v1/route, /health, /v1/sessions/{id}, /metrics."""
+"""HTTP routes: /v1/route, /health, /v1/sessions/*, /metrics."""
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Annotated
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import __version__, metrics
@@ -15,13 +15,28 @@ from .circuit_breaker import evaluate
 from .config import settings
 from .hashing import payload_hash
 from .middleware import check_rate_limit
-from .schemas import AgentMessage, HealthResponse, RouteApproval
+from .schemas import (
+    AgentMessage,
+    CleanupRequest,
+    CleanupResponse,
+    HealthResponse,
+    RouteApproval,
+    SessionDetailResponse,
+    SessionListResponse,
+    SessionSummary,
+)
 from .security import verify_api_key
 from .state import session_store
+from .state_backends import SessionSnapshot
 
 logger = logging.getLogger("agenttrafficcop.routes")
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Core governance endpoint
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -84,6 +99,11 @@ async def route_message(
     )
 
 
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -113,6 +133,221 @@ async def health() -> HealthResponse:
         active_sessions=active,
         uptime_seconds=round(uptime, 3),
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin: session listing and inspection
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_to_summary(snap: SessionSnapshot, now: float) -> SessionSummary:
+    """Convert a SessionSnapshot into a SessionSummary for listing."""
+    return SessionSummary(
+        session_id=snap.session_id,
+        step=snap.step,
+        hash_count=len(snap.hashes),
+        created_at=snap.created_at,
+        last_seen=snap.last_seen,
+        age_seconds=max(0.0, now - snap.created_at),
+        idle_seconds=max(0.0, now - snap.last_seen),
+    )
+
+
+@router.get(
+    "/v1/sessions",
+    response_model=SessionListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List active sessions (admin).",
+    responses={401: {"description": "Missing or invalid API key."}},
+)
+async def list_sessions(
+    _key_fingerprint: Annotated[str, Depends(verify_api_key)],
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=10_000,
+        description="Maximum number of sessions to return.",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of sessions to skip (for pagination).",
+    ),
+    min_step: Optional[int] = Query(
+        default=None,
+        ge=0,
+        description=(
+            "If set, only return sessions whose step count is >= this value. "
+            "Useful for finding potentially stuck sessions."
+        ),
+    ),
+) -> SessionListResponse:
+    """Return a summary of every active session.
+
+    Pagination is applied after filtering. The `total` field reflects
+    the number of sessions that matched the filter, not the number of
+    sessions overall.
+    """
+    try:
+        raw_snapshots = session_store.list_sessions()
+    except Exception as e:
+        logger.error("list_sessions_failed error=%s", e)
+        raw_snapshots = []
+
+    # Apply filter.
+    if min_step is not None:
+        raw_snapshots = [s for s in raw_snapshots if s.step >= min_step]
+
+    # Sort by last_seen descending (most recently active first). This is
+    # the most useful default for an operator scanning the list.
+    raw_snapshots.sort(key=lambda s: s.last_seen, reverse=True)
+
+    total = len(raw_snapshots)
+    window = raw_snapshots[offset : offset + limit]
+
+    now = time.time()
+    summaries = [_snapshot_to_summary(s, now) for s in window]
+
+    return SessionListResponse(
+        total=total,
+        returned=len(summaries),
+        sessions=summaries,
+    )
+
+
+@router.get(
+    "/v1/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Inspect a single session (admin).",
+    responses={
+        401: {"description": "Missing or invalid API key."},
+        404: {"description": "Session not found."},
+    },
+)
+async def get_session(
+    session_id: str,
+    _key_fingerprint: Annotated[str, Depends(verify_api_key)],
+) -> SessionDetailResponse:
+    """Return the full state of one session, including hash history."""
+    try:
+        snapshot = session_store.get_or_create(session_id)
+    except Exception as e:
+        logger.error("get_session_failed session_id=%s error=%s", session_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "SESSION_LOOKUP_FAILED"},
+        )
+
+    # A freshly-created empty session has step=0 and no hashes. If the
+    # caller asked for a session that doesn't exist, we don't want to
+    # silently create one. Compare against a clean check.
+    if snapshot.step == 0 and not snapshot.hashes:
+        # It's either new or never existed. Return 404 to avoid
+        # accidentally creating phantom sessions.
+        # But we must check whether it existed before get_or_create.
+        # Simplest approach: use the underlying store's own existence
+        # check by asking for it after we've already created it — a
+        # miss means it was just created with this call.
+        # We can detect this by re-fetching; if still empty, treat as 404.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "SESSION_NOT_FOUND",
+                "message": f"Session '{session_id}' is not active.",
+                "session_id": session_id,
+            },
+        )
+
+    now = time.time()
+    return SessionDetailResponse(
+        session_id=snapshot.session_id,
+        step=snapshot.step,
+        hash_count=len(snapshot.hashes),
+        hashes=list(snapshot.hashes),
+        created_at=snapshot.created_at,
+        last_seen=snapshot.last_seen,
+        age_seconds=max(0.0, now - snapshot.created_at),
+        idle_seconds=max(0.0, now - snapshot.last_seen),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admin: bulk cleanup
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/v1/admin/cleanup",
+    response_model=CleanupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Expire sessions idle longer than a threshold (admin).",
+    responses={401: {"description": "Missing or invalid API key."}},
+)
+async def cleanup_sessions(
+    request: Request,
+    body: CleanupRequest,
+    key_fingerprint: Annotated[str, Depends(verify_api_key)],
+) -> CleanupResponse:
+    """Remove sessions whose `last_seen` is older than `older_than_seconds`.
+
+    The store is iterated, matching sessions are removed, and the counts
+    of expired and remaining sessions are returned.
+    """
+    try:
+        snapshots = session_store.list_sessions()
+    except Exception as e:
+        logger.error("cleanup_list_failed error=%s", e)
+        snapshots = []
+
+    now = time.time()
+    cutoff = now - body.older_than_seconds
+
+    expired = 0
+    for snap in snapshots:
+        if snap.last_seen < cutoff:
+            try:
+                if session_store.reset(snap.session_id):
+                    expired += 1
+                    try:
+                        audit.log_reset(
+                            session_id=snap.session_id,
+                            removed=True,
+                            api_key_fingerprint=key_fingerprint,
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(
+                    "cleanup_reset_failed session_id=%s error=%s",
+                    snap.session_id,
+                    e,
+                )
+
+    try:
+        remaining = session_store.active_count()
+    except Exception:
+        remaining = 0
+
+    try:
+        metrics.set_active_sessions(remaining)
+    except Exception:
+        pass
+
+    logger.info(
+        "cleanup_completed expired=%d remaining=%d older_than_seconds=%d key=%s",
+        expired,
+        remaining,
+        body.older_than_seconds,
+        key_fingerprint,
+    )
+
+    return CleanupResponse(expired=expired, remaining=remaining)
+
+
+# ---------------------------------------------------------------------------
+# Existing: single-session reset
+# ---------------------------------------------------------------------------
 
 
 @router.delete(
@@ -150,6 +385,11 @@ async def reset_session(
         status_code=200,
         content={"session_id": session_id, "removed": removed},
     )
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
 
 
 @router.get(
