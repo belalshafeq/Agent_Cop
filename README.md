@@ -16,7 +16,11 @@ circuit breaker before an infinite loop burns your budget.
 - **Bounded memory** — LRU-capped sessions, fixed-length hash history.
 - **Redis-backed sessions** — optional; survives restarts, scales horizontally.
 - **Prometheus metrics** — `/metrics` endpoint, zero external dependencies.
+- **Audit log** — durable JSON Lines record of every governance event.
+- **Admin API** — list, inspect, and clean up active sessions.
+- **Session TTL** — optional auto-expiry of idle in-memory sessions.
 - **LangGraph integration** — wrap any node in one line.
+- **168 automated tests** — the whole stack, verified in CI on every push.
 
 ## See It In Action
 
@@ -362,7 +366,7 @@ Only **governance events** — not every approval.
 | `rate_limited` | A client exceeds the rate limit |
 
 **Approvals are NOT logged.** If you need a record of every successful
-message, that's a Phase 3 feature. For now, the audit log is scoped to
+message, that's a future feature. For now, the audit log is scoped to
 governance events only — a few thousand lines per day in a typical
 deployment, not millions.
 
@@ -416,12 +420,6 @@ jq -r 'select(.event == "trip") | .session_id' audit.log \
   | sort | uniq -c | sort -rn | head
 ```
 
-**Export to CSV for a report:**
-
-```bash
-jq -r '[.ts, .event, .error_code // "", .session_id // ""] | @csv' audit.log
-```
-
 ### Retention
 
 The file grows until you do something about it. Recommended retention:
@@ -446,17 +444,85 @@ The file grows until you do something about it. Recommended retention:
 `copytruncate` is important — it truncates the file in place so the
 server's open file handle keeps working without a restart.
 
-### Disabling the audit log
-
-Set `ATC_AUDIT_LOG_ENABLED=false` (or unset `ATC_AUDIT_LOG_PATH`).
-All audit calls become no-ops. Zero overhead.
-
 ### Failure modes
 
 The audit log **never blocks a request**. If the file can't be written
 (disk full, permissions, network filesystem failure), the error is
 logged to stderr and the request proceeds. Governance is always more
 important than record-keeping.
+
+## Session TTL
+
+Sessions can be configured to expire automatically after a period of
+inactivity. This is **opt-in** and applies to the in-memory backend
+only — Redis sessions use Redis's own `EXPIRE` mechanism
+(`ATC_REDIS_TTL_SECONDS`).
+
+### Enabling TTL
+
+Set `ATC_SESSION_TTL_SECONDS` to a positive number of seconds:
+
+```bash
+# In .env
+ATC_SESSION_TTL_SECONDS=3600    # expire idle sessions after 1 hour
+```
+
+Default is `0`, which disables TTL entirely. Sessions then live until
+explicitly reset or evicted by the LRU cap (`ATC_MAX_SESSIONS`).
+
+### How it works
+
+TTL uses **lazy eviction**: expiry is checked when a session is accessed,
+not on a background timer.
+
+- `get_or_create("x")` on an expired session treats it as brand new
+- `get("x")` on an expired session returns `None`
+- `record("x", hash)` on an expired session starts fresh at step 1
+- `list_sessions()` filters out expired sessions from its output
+
+**Memory note:** lazy eviction does not free memory until the session is
+touched. A session that is created and never accessed again stays in
+memory until the LRU cap evicts it. If you need proactive cleanup, use
+the Admin API's `POST /v1/admin/cleanup` endpoint on a cron schedule.
+
+### Choosing a TTL
+
+| Workload | Recommended TTL |
+|---|---|
+| Interactive workflows (single session per user request) | 300–3600 seconds |
+| Batch processing (long-running jobs) | 86400 (24 hours) |
+| Long-lived chat sessions | `0` (disabled) or 604800 (7 days) |
+| Compliance / audit-heavy deployments | 86400 with audit log retention |
+
+**Rule of thumb:** set TTL longer than your longest legitimate idle gap
+between messages in a single session. If a Coder↔Reviewer loop can
+legitimately pause for 20 minutes waiting for human approval, set TTL to
+at least 3600.
+
+### Interaction with the LRU cap
+
+Both mechanisms work together:
+
+1. **TTL** expires idle sessions on access.
+2. **LRU cap** (`ATC_MAX_SESSIONS`) evicts the least recently used
+   session when the cap is exceeded.
+
+If your workload keeps more than `ATC_MAX_SESSIONS` sessions alive
+simultaneously, the LRU cap becomes the dominant cleanup mechanism, and
+TTL matters less. If you have fewer active sessions but they go idle for
+long periods, TTL does the work.
+
+### Example — a 30-minute TTL for a production deployment
+
+```bash
+# In .env
+ATC_SESSION_TTL_SECONDS=1800
+ATC_MAX_SESSIONS=50000
+ATC_REDIS_URL=redis://localhost:6379/0   # if using Redis
+ATC_REDIS_TTL_SECONDS=1800                # keep Redis in sync
+```
+
+Both backends now expire idle sessions after 30 minutes.
 
 ## Admin API
 
@@ -619,12 +685,32 @@ you're on Codespaces (or a similar sandbox) and should use the
 
 ```bash
 pip install -r requirements.txt
+pip install -e ./sdk
 pytest
 ```
 
-The full suite runs in about 1 second. It covers hashing, security,
-the circuit breaker, all HTTP routes, the metrics system, and
-end-to-end scenarios.
+The full suite runs in about 15 seconds (some tests wait on real time
+for TTL expiry). It covers hashing, security, the circuit breaker, all
+HTTP routes, the metrics system, the audit log, the Admin API, session
+TTL, and the SDK.
+
+**Test counts by module:**
+
+| File | Tests |
+|---|---|
+| `tests/test_hashing.py` | 12 |
+| `tests/test_security.py` | 19 |
+| `tests/test_circuit_breaker.py` | 13 (+1 skip) |
+| `tests/test_routes.py` | 24 |
+| `tests/test_integration.py` | 7 |
+| `tests/test_metrics.py` | 22 |
+| `tests/test_middleware.py` | 5 |
+| `tests/test_audit.py` | 15 |
+| `tests/test_admin_api.py` | 17 |
+| `tests/test_state_ttl.py` | 12 |
+| `sdk/tests/test_client.py` | 15 |
+| `sdk/tests/test_langgraph.py` | 7 |
+| **Total** | **168 passed, 1 skipped** |
 
 ### Continuous Integration
 
@@ -648,21 +734,26 @@ agenttrafficcop/
 │   ├── logging_config.py
 │   ├── middleware.py
 │   ├── metrics.py
+│   ├── audit.py
 │   ├── routes.py
 │   └── main.py
 ├── sdk/                          # Python client
 │   ├── pyproject.toml
 │   ├── README.md
-│   └── agenttrafficcop/
-│       ├── __init__.py
-│       ├── exceptions.py
-│       ├── models.py
-│       ├── client.py
-│       ├── langgraph.py
-│       └── py.typed
+│   ├── agenttrafficcop/
+│   │   ├── __init__.py
+│   │   ├── exceptions.py
+│   │   ├── models.py
+│   │   ├── client.py
+│   │   ├── langgraph.py
+│   │   └── py.typed
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_client.py
+│       └── test_langgraph.py
 ├── examples/
 │   └── langgraph_demo.py         # runnable LangGraph demo
-├── tests/                        # pytest suite
+├── tests/                        # server test suite
 │   ├── conftest.py
 │   ├── test_hashing.py
 │   ├── test_security.py
@@ -670,7 +761,10 @@ agenttrafficcop/
 │   ├── test_routes.py
 │   ├── test_integration.py
 │   ├── test_metrics.py
-│   └── test_middleware.py
+│   ├── test_middleware.py
+│   ├── test_audit.py
+│   ├── test_admin_api.py
+│   └── test_state_ttl.py
 ├── demo.py                       # reference demo
 ├── demo_agents.py
 ├── run.py                        # server entrypoint
@@ -700,9 +794,12 @@ All settings are read from environment variables (or `.env`):
 | `ATC_MAX_BODY_BYTES` | `1048576` | Maximum request body size |
 | `ATC_METRICS_ENABLED` | `true` | Enable `/metrics` endpoint |
 | `ATC_METRICS_PATH` | `/metrics` | Path for the metrics endpoint |
+| `ATC_AUDIT_LOG_ENABLED` | `false` | Enable audit log writing |
+| `ATC_AUDIT_LOG_PATH` | (none) | File path for the audit log |
 | `ATC_REDIS_URL` | (none) | If set, use Redis for sessions |
 | `ATC_REDIS_TTL_SECONDS` | `86400` | Session TTL in Redis |
 | `ATC_REDIS_KEY_PREFIX` | `atc:` | Redis key namespace |
+| `ATC_SESSION_TTL_SECONDS` | `0` | In-memory session TTL. `0` disables expiry. |
 | `ATC_MAX_STEPS` | `25` | Hard cap on hops per session |
 | `ATC_MAX_REPEATED_HASHES` | `3` | Consecutive identical payloads before trip |
 | `ATC_MAX_CYCLE_LENGTH` | `2` | Max cycle length scanned |
@@ -725,14 +822,14 @@ All settings are read from environment variables (or `.env`):
 
 - **In-memory backend is single-process.** Sessions do not survive restarts
   and are not shared across replicas. Use Redis for multi-replica deployments.
+  Idle sessions in the in-memory backend can be auto-expired via
+  `ATC_SESSION_TTL_SECONDS` (opt-in, disabled by default).
 - **Exact-hash loop detection only.** Semantically-equivalent-but-differently-worded
   loops are not caught. Adding embeddings is a future feature.
 - **Rate limiting is per-process.** With multiple replicas, each has its own
   counter. A shared Redis-backed limiter is a future feature.
-- **No audit log.** Governance events are logged but not persisted to disk.
-- **No admin API.** Sessions can be reset individually by ID, but there is no
-  listing or bulk-cleanup endpoint.
 - **No multi-tenancy.** One API key list for all users; sessions are global.
+  This is a future feature.
 
 ## License
 
