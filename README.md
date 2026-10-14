@@ -1,5 +1,9 @@
 # AgentTrafficCop
 
+[![PyPI version](https://img.shields.io/pypi/v/agenttrafficcop.svg)](https://pypi.org/project/agenttrafficcop/)
+[![Python versions](https://img.shields.io/pypi/pyversions/agenttrafficcop.svg)](https://pypi.org/project/agenttrafficcop/)
+[![CI](https://github.com/belalshafeq/Agent_Cop/actions/workflows/ci.yml/badge.svg)](https://github.com/belalshafeq/Agent_Cop/actions/workflows/ci.yml)
+
 A zero-config **Multi-Agent Orchestration & Governance Middleware**.
 
 Sits between communicating AI agents, validates every handoff against a
