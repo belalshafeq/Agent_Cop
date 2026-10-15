@@ -23,8 +23,9 @@ circuit breaker before an infinite loop burns your budget.
 - **Audit log** — durable JSON Lines record of every governance event.
 - **Admin API** — list, inspect, and clean up active sessions.
 - **Session TTL** — optional auto-expiry of idle in-memory sessions.
+- **Usage metering** — per-API-key message counting and tier limits.
 - **LangGraph integration** — wrap any node in one line.
-- **168 automated tests** — the whole stack, verified in CI on every push.
+- **194 automated tests** — the whole stack, verified in CI on every push.
 
 ## See It In Action
 
@@ -176,6 +177,19 @@ Fourth call returns HTTP 422:
 curl -X DELETE http://localhost:8000/v1/sessions/run-42 \
   -H "authorization: Bearer $ATC_KEY"
 ```
+
+## Endpoints
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/route` | Bearer | Evaluate and approve an inter-agent message |
+| `GET` | `/health` | None | Liveness and uptime probe |
+| `GET` | `/v1/usage` | Bearer | Return this key's tier and monthly usage |
+| `GET` | `/v1/sessions` | Bearer | List active sessions (admin) |
+| `GET` | `/v1/sessions/{id}` | Bearer | Inspect one session (admin) |
+| `DELETE` | `/v1/sessions/{id}` | Bearer | Reset one session |
+| `POST` | `/v1/admin/cleanup` | Bearer | Expire idle sessions in bulk |
+| `GET` | `/metrics` | None | Prometheus metrics endpoint |
 
 ## LangGraph Support
 
@@ -446,9 +460,7 @@ scrape_configs:
     metrics_path: /metrics
 ```
 
-No authentication is required for `/metrics` — Prometheus scrapers
-typically don't support Bearer auth, and metrics contain no sensitive
-data (only aggregate counts and latencies).
+No authentication is required for `/metrics`.
 
 ### Example PromQL queries
 
@@ -473,20 +485,13 @@ sum(rate(atc_requests_total[5m]))
 
 ### Disabling metrics
 
-Set `ATC_METRICS_ENABLED=false` in your environment. The `/metrics`
-endpoint returns a stub body (`# metrics disabled`), and the middleware
-stops recording.
+Set `ATC_METRICS_ENABLED=false`. The `/metrics` endpoint returns a stub
+body (`# metrics disabled`), and the middleware stops recording.
 
 ### Customizing the path
 
 Set `ATC_METRICS_PATH=/internal/metrics` if `/metrics` clashes with
 another service.
-
-### What's NOT exposed
-
-Metrics never include session IDs, API key fingerprints, payload
-contents, client IPs, or any user-controlled string. Unbounded
-cardinality crashes Prometheus; bounded cardinality is the whole point.
 
 ## Audit Log
 
@@ -502,76 +507,41 @@ Only **governance events** — not every approval.
 
 | Event | Written when |
 |---|---|
-| `trip` | The circuit breaker fires (`REPEATED_PAYLOAD_LOOP`, `CYCLIC_PAYLOAD_LOOP`, `STEP_LIMIT_EXCEEDED`) |
-| `reset` | A session is deleted via `DELETE /v1/sessions/{id}` |
+| `trip` | The circuit breaker fires |
+| `reset` | A session is deleted |
 | `auth_failed` | An API key is missing, malformed, or invalid |
 | `schema_failed` | An incoming message fails Pydantic validation |
 | `rate_limited` | A client exceeds the rate limit |
-
-**Approvals are NOT logged.** If you need a record of every successful
-message, that's a future feature. For now, the audit log is scoped to
-governance events only — a few thousand lines per day in a typical
-deployment, not millions.
 
 ### File format
 
 Every line is a complete JSON object. Newline-delimited.
 
 ```json
-{"ts":"2026-10-12T10:47:05.954123Z","event":"trip","error_code":"REPEATED_PAYLOAD_LOOP","session_id":"audit-test","step":3,"sender":"coder","recipient":"reviewer","diagnostics":{"repeated_hash":"5041bf...","consecutive_repeats":3,"max_repeated_hashes":3},"api_key_fingerprint":"dee50c67"}
+{"ts":"2026-10-12T10:47:05.954123Z","event":"trip","error_code":"REPEATED_PAYLOAD_LOOP","session_id":"audit-test","step":3,"diagnostics":{"repeated_hash":"5041bf...","consecutive_repeats":3},"api_key_fingerprint":"dee50c67"}
 {"ts":"2026-10-12T10:47:06.011085Z","event":"reset","session_id":"audit-test","removed":true,"api_key_fingerprint":"dee50c67"}
-{"ts":"2026-10-12T10:47:06.074092Z","event":"schema_failed","session_id":"x","error_count":4}
 ```
 
 **Security notes:**
-- API keys are recorded as **fingerprints only** (truncated SHA-256) — never the raw key.
-- Payload contents are **never** logged — only their SHA-256 hash, and only on trips.
-- The file is plain text on disk. Whoever can read it can read it. Treat it like any other sensitive log.
+- API keys are recorded as **fingerprints only** — never the raw key.
+- Payload contents are **never** logged — only their SHA-256 hash.
 
 ### Querying the log
 
-The file is designed to work with standard Unix tools.
-
-**Count trips today:**
-
 ```bash
+# Count trips today
 grep '"event":"trip"' audit.log | wc -l
-```
 
-**Find all trips for a specific session:**
-
-```bash
+# Find all events for one session
 grep '"session_id":"demo-loop"' audit.log
-```
 
-**Extract only trip reasons using `jq`:**
-
-```bash
+# Extract trip reasons with jq
 jq -r 'select(.event == "trip") | .error_code' audit.log | sort | uniq -c
-```
-
-**Watch the log live:**
-
-```bash
-tail -f audit.log | jq -c '.'
-```
-
-**Find sessions that tripped more than once:**
-
-```bash
-jq -r 'select(.event == "trip") | .session_id' audit.log \
-  | sort | uniq -c | sort -rn | head
 ```
 
 ### Retention
 
-The file grows until you do something about it. Recommended retention:
-
-- **Development:** keep whatever you want; delete when it bothers you.
-- **Production:** rotate daily or weekly with `logrotate`, keep 90 days.
-- **Regulated:** ship to S3 or a database, keep 1+ years, sign for tamper-evidence.
-
-**Basic `logrotate` config** (`/etc/logrotate.d/agenttrafficcop`):
+Use `logrotate` in production:
 
 ```
 /path/to/audit.log {
@@ -584,88 +554,39 @@ The file grows until you do something about it. Recommended retention:
 }
 ```
 
-`copytruncate` is important — it truncates the file in place so the
-server's open file handle keeps working without a restart.
-
-### Failure modes
-
-The audit log **never blocks a request**. If the file can't be written
-(disk full, permissions, network filesystem failure), the error is
-logged to stderr and the request proceeds. Governance is always more
-important than record-keeping.
-
 ## Session TTL
 
-Sessions can be configured to expire automatically after a period of
-inactivity. This is **opt-in** and applies to the in-memory backend
-only — Redis sessions use Redis's own `EXPIRE` mechanism
-(`ATC_REDIS_TTL_SECONDS`).
+Sessions can expire automatically after a period of inactivity. This
+is **opt-in** and applies to the in-memory backend only — Redis
+sessions use Redis's own `EXPIRE` mechanism.
 
 ### Enabling TTL
-
-Set `ATC_SESSION_TTL_SECONDS` to a positive number of seconds:
 
 ```bash
 # In .env
 ATC_SESSION_TTL_SECONDS=3600    # expire idle sessions after 1 hour
 ```
 
-Default is `0`, which disables TTL entirely. Sessions then live until
-explicitly reset or evicted by the LRU cap (`ATC_MAX_SESSIONS`).
+Default is `0`, which disables TTL. Sessions then live until explicitly
+reset or evicted by the LRU cap (`ATC_MAX_SESSIONS`).
 
 ### How it works
 
 TTL uses **lazy eviction**: expiry is checked when a session is accessed,
 not on a background timer.
 
-- `get_or_create("x")` on an expired session treats it as brand new
-- `get("x")` on an expired session returns `None`
-- `record("x", hash)` on an expired session starts fresh at step 1
-- `list_sessions()` filters out expired sessions from its output
+- `get_or_create()` on an expired session treats it as brand new
+- `get()` on an expired session returns `None`
+- `record()` on an expired session starts fresh at step 1
+- `list_sessions()` filters expired sessions from its output
 
-**Memory note:** lazy eviction does not free memory until the session is
-touched. A session that is created and never accessed again stays in
-memory until the LRU cap evicts it. If you need proactive cleanup, use
-the Admin API's `POST /v1/admin/cleanup` endpoint on a cron schedule.
-
-### Choosing a TTL
+### Recommended TTL by workload
 
 | Workload | Recommended TTL |
 |---|---|
-| Interactive workflows (single session per user request) | 300–3600 seconds |
-| Batch processing (long-running jobs) | 86400 (24 hours) |
-| Long-lived chat sessions | `0` (disabled) or 604800 (7 days) |
-| Compliance / audit-heavy deployments | 86400 with audit log retention |
-
-**Rule of thumb:** set TTL longer than your longest legitimate idle gap
-between messages in a single session. If a Coder↔Reviewer loop can
-legitimately pause for 20 minutes waiting for human approval, set TTL to
-at least 3600.
-
-### Interaction with the LRU cap
-
-Both mechanisms work together:
-
-1. **TTL** expires idle sessions on access.
-2. **LRU cap** (`ATC_MAX_SESSIONS`) evicts the least recently used
-   session when the cap is exceeded.
-
-If your workload keeps more than `ATC_MAX_SESSIONS` sessions alive
-simultaneously, the LRU cap becomes the dominant cleanup mechanism, and
-TTL matters less. If you have fewer active sessions but they go idle for
-long periods, TTL does the work.
-
-### Example — a 30-minute TTL for a production deployment
-
-```bash
-# In .env
-ATC_SESSION_TTL_SECONDS=1800
-ATC_MAX_SESSIONS=50000
-ATC_REDIS_URL=redis://localhost:6379/0   # if using Redis
-ATC_REDIS_TTL_SECONDS=1800                # keep Redis in sync
-```
-
-Both backends now expire idle sessions after 30 minutes.
+| Interactive workflows | 300–3600 seconds |
+| Batch processing | 86400 (24 hours) |
+| Long-lived chat sessions | `0` or 604800 (7 days) |
 
 ## Admin API
 
@@ -681,68 +602,20 @@ curl "http://localhost:8000/v1/sessions" \
   -H "authorization: Bearer $ATC_KEY"
 ```
 
-Response:
-
-```json
-{
-  "total": 47,
-  "returned": 47,
-  "sessions": [
-    {
-      "session_id": "run-42",
-      "step": 8,
-      "hash_count": 8,
-      "created_at": 1791793600.00,
-      "last_seen": 1791793800.00,
-      "age_seconds": 200.5,
-      "idle_seconds": 0.5
-    }
-  ]
-}
-```
-
-**Query parameters:**
+Query parameters:
 
 | Param | Default | Meaning |
 |---|---|---|
-| `limit` | 100 | Maximum sessions to return (1–10,000) |
+| `limit` | 100 | Max sessions to return (1–10,000) |
 | `offset` | 0 | Pagination offset |
-| `min_step` | (none) | Only return sessions with `step >= min_step`. Useful for finding potentially stuck sessions. |
-
-**Example — find sessions that have run more than 5 steps:**
-
-```bash
-curl "http://localhost:8000/v1/sessions?min_step=5" \
-  -H "authorization: Bearer $ATC_KEY"
-```
+| `min_step` | (none) | Only sessions with `step >= min_step` |
 
 ### `GET /v1/sessions/{session_id}`
 
 Return a single session's full state, including the recent payload hashes.
 
-```bash
-curl "http://localhost:8000/v1/sessions/run-42" \
-  -H "authorization: Bearer $ATC_KEY"
-```
-
-Response:
-
-```json
-{
-  "session_id": "run-42",
-  "step": 8,
-  "hash_count": 8,
-  "hashes": ["a3f9...", "b8e2...", "a3f9...", "b8e2...", "..."],
-  "created_at": 1791793600.00,
-  "last_seen": 1791793800.00,
-  "age_seconds": 200.5,
-  "idle_seconds": 0.5
-}
-```
-
-**The hash list is what you inspect when diagnosing a loop.** For an A↔B ping-pong, you'll see the same two hashes alternating.
-
-Returns **404** if the session doesn't exist. Read-only — calling this endpoint never creates a session.
+Returns **404** if the session doesn't exist. Read-only — never creates
+a session.
 
 ### `POST /v1/admin/cleanup`
 
@@ -755,40 +628,13 @@ curl -X POST "http://localhost:8000/v1/admin/cleanup" \
   -d '{"older_than_seconds": 3600}'
 ```
 
-Response:
+Response: `{"expired": 12, "remaining": 35}`
 
-```json
-{"expired": 12, "remaining": 35}
-```
-
-Every expired session is also written to the audit log as a `reset` event.
-
-**Typical usage:** run as a cron job every hour to enforce a maximum session age.
-
-```bash
-# Cleanup script — run from cron
-curl -s -X POST http://your-host:8000/v1/admin/cleanup \
-  -H 'content-type: application/json' \
-  -H "authorization: Bearer $ATC_KEY" \
-  -d '{"older_than_seconds": 86400}'
-```
-
-### Why these endpoints exist
-
-- **Support engineers:** "Which session is stuck?" → `GET /v1/sessions?min_step=10`
-- **Ops:** "Free memory before a load test" → `POST /v1/admin/cleanup`
-- **Debugging:** "What's actually in memory right now?" → `GET /v1/sessions`
-- **Diagnosis:** "What payloads are cycling?" → `GET /v1/sessions/{id}` and look at the hashes
-
-### What's NOT exposed
-
-- **Session payloads.** Only their SHA-256 hashes. Raw payloads are never stored.
-- **Session ownership.** Anyone with a valid API key can list and inspect every session.
-- **Cross-tenant isolation.** One namespace for all sessions. Multi-tenancy is a future feature.
+Every expired session is written to the audit log as a `reset` event.
 
 ## Docker Deployment
 
-Two compose files ship with this repo, for two different environments.
+Two compose files ship with this repo, for two environments.
 
 ### On a real Linux host (production)
 
@@ -796,7 +642,7 @@ Two compose files ship with this repo, for two different environments.
 docker compose up -d --build
 ```
 
-Uses standard bridge networking. Works on Fly.io, Railway, AWS, VPS, bare metal.
+Standard bridge networking. Works on Fly.io, Railway, AWS, VPS, bare metal.
 
 ### On GitHub Codespaces (development)
 
@@ -804,23 +650,19 @@ Uses standard bridge networking. Works on Fly.io, Railway, AWS, VPS, bare metal.
 docker compose -f docker-compose.codespaces.yml up -d --build
 ```
 
-Uses host networking because GitHub Codespaces' Docker daemon
-**cannot create working bridge networks**. Every bridge interface on
-Codespaces comes up in `NO-CARRIER` / `DOWN` state, so containers
-attached to a bridge can never reach each other. This is a
-Codespaces-level limitation, not a bug in this project.
+Uses host networking because GitHub Codespaces' Docker daemon **cannot
+create working bridge networks**. Every bridge interface comes up in
+`NO-CARRIER` / `DOWN` state, so containers cannot reach each other.
 
-Diagnostic signature of the Codespaces issue:
+Diagnostic:
 
 ```bash
 ip link show type bridge
 # → docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> ... state DOWN
-# → br-xxxxxxxx: <NO-CARRIER,BROADCAST,MULTICAST,UP> ... state DOWN
 ```
 
 **Rule of thumb:** if `ip link show type bridge` shows `NO-CARRIER`,
-you're on Codespaces (or a similar sandbox) and should use the
-`.codespaces.yml` file.
+use the `.codespaces.yml` file.
 
 ## Development
 
@@ -832,10 +674,9 @@ pip install -e ./sdk
 pytest
 ```
 
-The full suite runs in about 15 seconds (some tests wait on real time
-for TTL expiry). It covers hashing, security, the circuit breaker, all
-HTTP routes, the metrics system, the audit log, the Admin API, session
-TTL, and the SDK.
+The full suite runs in about 15 seconds. It covers hashing, security,
+the circuit breaker, all HTTP routes, the metrics system, the audit
+log, the Admin API, session TTL, usage metering, and the SDK.
 
 **Test counts by module:**
 
@@ -851,9 +692,10 @@ TTL, and the SDK.
 | `tests/test_audit.py` | 15 |
 | `tests/test_admin_api.py` | 17 |
 | `tests/test_state_ttl.py` | 12 |
+| `tests/test_usage.py` | 26 |
 | `sdk/tests/test_client.py` | 15 |
 | `sdk/tests/test_langgraph.py` | 7 |
-| **Total** | **168 passed, 1 skipped** |
+| **Total** | **194 passed, 1 skipped** |
 
 ### Continuous Integration
 
@@ -878,6 +720,7 @@ agenttrafficcop/
 │   ├── middleware.py
 │   ├── metrics.py
 │   ├── audit.py
+│   ├── usage.py
 │   ├── routes.py
 │   └── main.py
 ├── sdk/                          # Python client
@@ -896,6 +739,8 @@ agenttrafficcop/
 │       └── test_langgraph.py
 ├── examples/
 │   └── langgraph_demo.py         # runnable LangGraph demo
+├── landing/                      # static landing page
+│   └── index.html
 ├── tests/                        # server test suite
 │   ├── conftest.py
 │   ├── test_hashing.py
@@ -907,7 +752,8 @@ agenttrafficcop/
 │   ├── test_middleware.py
 │   ├── test_audit.py
 │   ├── test_admin_api.py
-│   └── test_state_ttl.py
+│   ├── test_state_ttl.py
+│   └── test_usage.py
 ├── demo.py                       # reference demo
 ├── demo_agents.py
 ├── run.py                        # server entrypoint
@@ -932,14 +778,24 @@ All settings are read from environment variables (or `.env`):
 | `ATC_PORT` | `8000` | Bind port |
 | `ATC_ENV` | `development` | `production` disables `/docs` |
 | `ATC_LOG_LEVEL` | `INFO` | Log level |
-| `ATC_API_KEYS` | (none) | Comma-separated Bearer keys. **Required.** |
+| `ATC_API_KEYS` | (none) | Comma-separated Bearer keys. **Required.** Treated as `team` tier. |
+| `ATC_FREE_API_KEYS` | (none) | Keys assigned to the `free` tier |
+| `ATC_PRO_API_KEYS` | (none) | Keys assigned to the `pro` tier |
+| `ATC_TEAM_API_KEYS` | (none) | Keys assigned to the `team` tier |
+| `ATC_ENTERPRISE_API_KEYS` | (none) | Keys assigned to the `enterprise` tier |
+| `ATC_TIER_FREE_LIMIT` | `10000` | Monthly message limit for the free tier |
+| `ATC_TIER_PRO_LIMIT` | `250000` | Monthly limit for the pro tier |
+| `ATC_TIER_TEAM_LIMIT` | `2000000` | Monthly limit for the team tier |
+| `ATC_TIER_ENTERPRISE_LIMIT` | `0` | Monthly limit for enterprise (0 = unlimited) |
+| `ATC_USAGE_ENFORCEMENT_ENABLED` | `true` | Reject requests when over tier limit |
+| `ATC_USAGE_KEY_PREFIX` | `atc:usage:` | Redis key prefix for usage counters |
 | `ATC_RATE_LIMIT_PER_MINUTE` | `120` | Per-client request limit |
 | `ATC_MAX_BODY_BYTES` | `1048576` | Maximum request body size |
 | `ATC_METRICS_ENABLED` | `true` | Enable `/metrics` endpoint |
 | `ATC_METRICS_PATH` | `/metrics` | Path for the metrics endpoint |
 | `ATC_AUDIT_LOG_ENABLED` | `false` | Enable audit log writing |
 | `ATC_AUDIT_LOG_PATH` | (none) | File path for the audit log |
-| `ATC_REDIS_URL` | (none) | If set, use Redis for sessions |
+| `ATC_REDIS_URL` | (none) | If set, use Redis for sessions and usage |
 | `ATC_REDIS_TTL_SECONDS` | `86400` | Session TTL in Redis |
 | `ATC_REDIS_KEY_PREFIX` | `atc:` | Redis key namespace |
 | `ATC_SESSION_TTL_SECONDS` | `0` | In-memory session TTL. `0` disables expiry. |
@@ -952,7 +808,7 @@ All settings are read from environment variables (or `.env`):
 
 ## Security Notes
 
-- **Auth is fail-closed** — if `ATC_API_KEYS` is empty, every `/v1/route` call is rejected with 401.
+- **Auth is fail-closed** — if no API keys are configured, every `/v1/route` call is rejected with 401.
 - **Constant-time key comparison** — prevents timing attacks.
 - **No secrets in logs** — only truncated SHA-256 fingerprints for correlation.
 - **No `pickle` / `eval` / `exec`** — hashing uses canonical JSON.
@@ -963,16 +819,17 @@ All settings are read from environment variables (or `.env`):
 
 ## Limitations (honest list)
 
-- **In-memory backend is single-process.** Sessions do not survive restarts
-  and are not shared across replicas. Use Redis for multi-replica deployments.
-  Idle sessions in the in-memory backend can be auto-expired via
-  `ATC_SESSION_TTL_SECONDS` (opt-in, disabled by default).
+- **In-memory backend is single-process.** Sessions and usage counters
+  do not survive restarts and are not shared across replicas. Use Redis
+  for multi-replica deployments.
 - **Exact-hash loop detection only.** Semantically-equivalent-but-differently-worded
   loops are not caught. Adding embeddings is a future feature.
-- **Rate limiting is per-process.** With multiple replicas, each has its own
-  counter. A shared Redis-backed limiter is a future feature.
-- **No multi-tenancy.** One API key list for all users; sessions are global.
-  This is a future feature.
+- **Rate limiting is per-process.** With multiple replicas, each has
+  its own counter. A shared Redis-backed limiter is a future feature.
+- **No multi-tenancy.** One API key list for all users; sessions are
+  global. This is a future feature.
+- **No self-serve tier changes.** Upgrades are manual (edit `.env` and
+  restart). Stripe integration is a future feature.
 
 ## License
 
