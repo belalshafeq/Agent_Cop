@@ -83,6 +83,10 @@ class Settings:
 
     # --- Security (legacy list — treated as team tier) ---
     api_keys: Tuple[str, ...] = field(default_factory=_env_api_keys)
+    # Optional comma-separated list of additional CORS origins.
+    cors_origins: Optional[str] = field(
+        default_factory=lambda: _env_optional_str("ATC_CORS_ORIGINS")
+    )
 
     # --- Tier assignments ---
     # Any key listed in ATC_API_KEYS is treated as `team`.

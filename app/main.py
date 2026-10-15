@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
@@ -81,6 +82,46 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
+    )
+
+    # ---------------------------------------------------------------------
+    # CORS
+    # ---------------------------------------------------------------------
+    # The landing page (and any future frontend) runs on a different origin
+    # than the backend. The browser sends a preflight OPTIONS request before
+    # any cross-origin POST — we must explicitly allow it here, or the
+    # browser blocks the real request.
+    #
+    # Origins are read from ATC_CORS_ORIGINS (comma-separated). Defaults
+    # cover local dev, Cloudflare Pages, and the Cloudflare Tunnel URL.
+    #
+    # Note: `allow_credentials=True` cannot be combined with `allow_origins=["*"]`.
+    # We list explicit origins instead.
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+        "https://agent-cop.pages.dev",
+        "https://agenttrafficcop.com",
+        "https://www.agenttrafficcop.com",
+    ]
+    # Add anything from the environment.
+    extra = [
+        o.strip()
+        for o in (settings.cors_origins or "").split(",")
+        if o.strip()
+    ]
+    allowed_origins.extend(extra)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["content-type", "authorization"],
+        expose_headers=["Retry-After"],
+        max_age=600,
     )
 
     install_middleware(app)
