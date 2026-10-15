@@ -69,9 +69,7 @@
     .d2 { transition-delay: 0.12s; }
     .d3 { transition-delay: 0.18s; }
 
-    /* ═══════════════════════════════════════════════════
-       HEADER — 48px, minimal
-       ═══════════════════════════════════════════════════ */
+    /* HEADER */
     header {
       position: fixed;
       top: 0; left: 0; right: 0;
@@ -120,9 +118,7 @@
       .nav-links { display: none; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       HERO — quiet, left-aligned, huge type, restrained
-       ═══════════════════════════════════════════════════ */
+    /* HERO */
     .hero {
       padding: 200px 0 140px;
     }
@@ -159,7 +155,6 @@
       font-style: italic;
       font-weight: 300;
       color: var(--fg-2);
-      font-family: 'Inter', serif;
     }
 
     .hero-sub {
@@ -224,9 +219,7 @@
       .wrap { padding: 0 24px; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       TERMINAL — quiet, no chrome decoration
-       ═══════════════════════════════════════════════════ */
+    /* TERMINAL */
     .terminal {
       background: #050505;
       border: 1px solid var(--line);
@@ -262,12 +255,11 @@
       .terminal { margin-top: 64px; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       SECTIONS — uniform rhythm, tiny labels
-       ═══════════════════════════════════════════════════ */
+    /* SECTIONS */
     section.block {
       padding: 128px 0;
       border-top: 1px solid var(--line);
+      scroll-margin-top: 72px;
     }
     .section-label {
       font-family: 'JetBrains Mono', monospace;
@@ -292,9 +284,7 @@
       color: var(--fg-2);
     }
 
-    /* ═══════════════════════════════════════════════════
-       FEATURES — three rows, hairline separators
-       ═══════════════════════════════════════════════════ */
+    /* FEATURES */
     .feature-list {
       border-top: 1px solid var(--line);
     }
@@ -332,9 +322,7 @@
       .feature-row { grid-template-columns: 32px 1fr; gap: 16px; padding: 32px 0; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       CODE
-       ═══════════════════════════════════════════════════ */
+    /* CODE */
     .code-block {
       background: #050505;
       border: 1px solid var(--line);
@@ -365,23 +353,20 @@
       .code-body { padding: 20px; font-size: 11px; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       STATS
-       ═══════════════════════════════════════════════════ */
+    /* STATS */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 0;
       border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
     }
     .stat {
       padding: 40px 32px;
       border-right: 1px solid var(--line);
       border-bottom: 1px solid var(--line);
     }
-    .stat:last-child { border-right: none; }
     .stat-value {
-      font-family: 'Inter', sans-serif;
       font-size: 32px;
       font-weight: 500;
       letter-spacing: -0.03em;
@@ -405,12 +390,9 @@
     }
     @media (max-width: 720px) {
       .stats { grid-template-columns: repeat(2, 1fr); }
-      .stat:nth-child(2) { border-right: none; }
     }
 
-    /* ═══════════════════════════════════════════════════
-       PRICING — quiet table
-       ═══════════════════════════════════════════════════ */
+    /* PRICING */
     .pricing {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -484,6 +466,7 @@
       transition: all 0.15s;
       background: transparent;
       font-family: 'Inter', sans-serif;
+      cursor: pointer;
     }
     .plan .btn:hover {
       background: var(--fg);
@@ -521,9 +504,7 @@
       .plan { border-right: none; border-bottom: 1px solid var(--line); }
     }
 
-    /* ═══════════════════════════════════════════════════
-       CTA — plain, huge, quiet
-       ═══════════════════════════════════════════════════ */
+    /* CTA */
     .cta {
       padding: 160px 0;
       border-top: 1px solid var(--line);
@@ -556,9 +537,7 @@
       align-items: flex-start;
     }
 
-    /* ═══════════════════════════════════════════════════
-       FOOTER — tiny, quiet
-       ═══════════════════════════════════════════════════ */
+    /* FOOTER */
     footer {
       padding: 40px 0;
       border-top: 1px solid var(--line);
@@ -578,7 +557,6 @@
     footer a { transition: color 0.15s; }
     footer a:hover { color: var(--fg); }
 
-    /* ── Reduced motion ── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.001ms !important;
@@ -590,9 +568,7 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════
-     HEADER
-     ═══════════════════════════════════════════════════ -->
+<!-- HEADER -->
 <header>
   <div class="wrap">
     <a href="#" class="brand">
@@ -609,9 +585,7 @@
   </div>
 </header>
 
-<!-- ═══════════════════════════════════════════════════
-     HERO
-     ═══════════════════════════════════════════════════ -->
+<!-- HERO -->
 <section class="hero">
   <div class="wrap">
     <div class="hero-eyebrow reveal">
@@ -682,9 +656,7 @@
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     FEATURES
-     ═══════════════════════════════════════════════════ -->
+<!-- FEATURES -->
 <section id="features" class="block">
   <div class="wrap">
     <div class="section-label reveal">01 — Features</div>
@@ -719,9 +691,7 @@
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     HOW
-     ═══════════════════════════════════════════════════ -->
+<!-- HOW -->
 <section id="how" class="block">
   <div class="wrap">
     <div class="section-label reveal">02 — Integrate</div>
@@ -757,9 +727,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     STATS
-     ═══════════════════════════════════════════════════ -->
+<!-- STATS -->
 <section class="block">
   <div class="wrap">
     <div class="section-label reveal">03 — Built for production</div>
@@ -768,9 +736,9 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
       <em>hardened.</em>
     </h2>
 
-    <div class="stats reveal d2" style="border-left: 1px solid var(--line);">
+    <div class="stats reveal d2">
       <div class="stat">
-        <div class="stat-value">168</div>
+        <div class="stat-value">194</div>
         <div class="stat-label">Tests</div>
         <div class="stat-desc">Passing in CI on every commit</div>
       </div>
@@ -793,9 +761,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     PRICING
-     ═══════════════════════════════════════════════════ -->
+<!-- PRICING -->
 <section id="pricing" class="block">
   <div class="wrap">
     <div class="section-label reveal">04 — Pricing</div>
@@ -832,7 +798,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
           <li>30-day audit log</li>
           <li>Email support</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Pro%20plan" class="btn">Join waitlist</a>
+        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Pro%20tier%20waitlist" class="btn">Join waitlist</a>
       </div>
 
       <div class="plan">
@@ -845,7 +811,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
           <li>Priority support</li>
           <li>Slack Connect</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Team%20plan" class="btn">Contact</a>
+        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Team%20tier" class="btn">Contact</a>
       </div>
 
       <div class="plan">
@@ -858,15 +824,13 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
           <li>On-prem or VPC</li>
           <li>DPA, BAA</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Enterprise%20inquiry" class="btn">Contact</a>
+        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Enterprise%20inquiry" class="btn">Contact</a>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     CTA
-     ═══════════════════════════════════════════════════ -->
+<!-- CTA -->
 <section class="cta">
   <div class="wrap">
     <h2 class="reveal">
@@ -888,7 +852,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
         <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener" class="link-btn">
           PyPI <span class="arrow">↗</span>
         </a>
-        <a href="mailto:hello@agenttrafficcop.com" class="link-btn">
+        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact" class="link-btn">
           Contact <span class="arrow">↗</span>
         </a>
       </div>
@@ -896,16 +860,14 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════
-     FOOTER
-     ═══════════════════════════════════════════════════ -->
+<!-- FOOTER -->
 <footer>
   <div class="wrap">
     <div>AgentTrafficCop · v0.1.0 · 2026</div>
     <div class="meta">
       <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
       <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI</a>
-      <a href="mailto:hello@agenttrafficcop.com">Contact</a>
+      <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact">Contact</a>
       <span>MIT</span>
     </div>
   </div>
