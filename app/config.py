@@ -52,11 +52,19 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_api_keys() -> Tuple[str, ...]:
+    """Legacy ATC_API_KEYS — treated as `team` tier."""
     raw = os.getenv("ATC_API_KEYS", "")
     if not raw:
         return ()
-    parts = [p.strip() for p in raw.split(",")]
-    return tuple(p for p in parts if p)
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+def _env_key_list(name: str) -> Tuple[str, ...]:
+    """Comma-separated key list for tier-specific assignment."""
+    raw = os.getenv(name, "")
+    if not raw:
+        return ()
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
 
 
 @dataclass(frozen=True)
@@ -73,8 +81,53 @@ class Settings:
         default_factory=lambda: _env_str("ATC_LOG_LEVEL", "INFO").upper()
     )
 
-    # --- Security ---
+    # --- Security (legacy list — treated as team tier) ---
     api_keys: Tuple[str, ...] = field(default_factory=_env_api_keys)
+
+    # --- Tier assignments ---
+    # Any key listed in ATC_API_KEYS is treated as `team`.
+    # Override per key by listing it in the appropriate *_API_KEYS var.
+    # A key listed in multiple tiers resolves to the most permissive tier.
+    free_api_keys: Tuple[str, ...] = field(
+        default_factory=lambda: _env_key_list("ATC_FREE_API_KEYS")
+    )
+    pro_api_keys: Tuple[str, ...] = field(
+        default_factory=lambda: _env_key_list("ATC_PRO_API_KEYS")
+    )
+    team_api_keys: Tuple[str, ...] = field(
+        default_factory=lambda: _env_key_list("ATC_TEAM_API_KEYS")
+    )
+    enterprise_api_keys: Tuple[str, ...] = field(
+        default_factory=lambda: _env_key_list("ATC_ENTERPRISE_API_KEYS")
+    )
+
+    # --- Tier message limits (per calendar month) ---
+    # 0 = unlimited
+    tier_free_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_FREE_LIMIT", 10_000, minimum=0)
+    )
+    tier_pro_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_PRO_LIMIT", 250_000, minimum=0)
+    )
+    tier_team_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_TEAM_LIMIT", 2_000_000, minimum=0)
+    )
+    tier_enterprise_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_ENTERPRISE_LIMIT", 0, minimum=0)
+    )
+
+    # --- Usage metering ---
+    # If true, requests are rejected when a key exceeds its tier limit.
+    # If false, metering is track-only (useful for testing).
+    usage_enforcement_enabled: bool = field(
+        default_factory=lambda: _env_bool("ATC_USAGE_ENFORCEMENT_ENABLED", True)
+    )
+    # Redis key prefix for usage counters (kept separate from session prefix).
+    usage_key_prefix: str = field(
+        default_factory=lambda: _env_str("ATC_USAGE_KEY_PREFIX", "atc:usage:")
+    )
+
+    # --- Request limits ---
     max_body_bytes: int = field(
         default_factory=lambda: _env_int("ATC_MAX_BODY_BYTES", 1_048_576, minimum=1)
     )
@@ -108,8 +161,6 @@ class Settings:
     redis_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_REDIS_KEY_PREFIX", "atc:")
     )
-    # In-memory session TTL. 0 = disabled (sessions never expire except
-    # via LRU eviction). Opt-in for parity with Redis TTL.
     session_ttl_seconds: int = field(
         default_factory=lambda: _env_int("ATC_SESSION_TTL_SECONDS", 0, minimum=0)
     )
@@ -134,13 +185,15 @@ class Settings:
         default_factory=lambda: _env_int("ATC_MAX_SESSIONS", 10_000, minimum=1)
     )
 
+    # --- Derived ---
+
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in {"production", "prod"}
 
     @property
     def auth_enabled(self) -> bool:
-        return len(self.api_keys) > 0
+        return len(self.api_keys) > 0 or len(self._all_tier_keys()) > 0
 
     @property
     def redis_enabled(self) -> bool:
@@ -153,6 +206,42 @@ class Settings:
     @property
     def ttl_enabled(self) -> bool:
         return self.session_ttl_seconds > 0
+
+    def _all_tier_keys(self) -> Tuple[str, ...]:
+        return (
+            self.free_api_keys
+            + self.pro_api_keys
+            + self.team_api_keys
+            + self.enterprise_api_keys
+        )
+
+    def tier_for_key(self, key: str) -> str:
+        """Return the tier name for a given raw API key.
+
+        Precedence (most permissive wins):
+            enterprise > team > pro > free
+        Legacy ATC_API_KEYS default to `team`.
+        """
+        if key in self.enterprise_api_keys:
+            return "enterprise"
+        if key in self.team_api_keys or key in self.api_keys:
+            return "team"
+        if key in self.pro_api_keys:
+            return "pro"
+        if key in self.free_api_keys:
+            return "free"
+        # Unknown key — treat as free (auth will have already rejected it
+        # in practice; this is a defensive default).
+        return "free"
+
+    def limit_for_tier(self, tier: str) -> int:
+        """Return the message-per-month limit for a tier (0 = unlimited)."""
+        return {
+            "free": self.tier_free_limit,
+            "pro": self.tier_pro_limit,
+            "team": self.tier_team_limit,
+            "enterprise": self.tier_enterprise_limit,
+        }.get(tier, self.tier_free_limit)
 
 
 settings = Settings()
