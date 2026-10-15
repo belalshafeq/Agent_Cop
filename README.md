@@ -275,6 +275,145 @@ except LoopDetected as e:
     print("loop caught:", e.error_code, e.diagnostics)
 ```
 
+## Tiers & Usage
+
+Every API key is assigned a tier, and every tier has a monthly message
+limit. The server counts messages per key and rejects further requests
+once a key exceeds its limit.
+
+### Default tiers
+
+| Tier | Monthly message limit |
+|---|---|
+| `free` | 10,000 |
+| `pro` | 250,000 |
+| `team` | 2,000,000 |
+| `enterprise` | Unlimited (0 in config means no cap) |
+
+Limits are configured via `ATC_TIER_*_LIMIT` in `.env`.
+
+### Assigning tiers to keys
+
+By default, every key listed in `ATC_API_KEYS` is treated as the `team`
+tier. To assign a specific tier to a key, list it in one of the
+tier-specific variables:
+
+```bash
+# In .env
+ATC_FREE_API_KEYS=freekey1,freekey2
+ATC_PRO_API_KEYS=prokey1
+ATC_TEAM_API_KEYS=teamkey1
+ATC_ENTERPRISE_API_KEYS=acmecorpkey
+```
+
+If a key appears in multiple tiers, the **most permissive** tier wins
+(enterprise > team > pro > free).
+
+### Checking usage
+
+Any key can query its own usage:
+
+```bash
+curl http://localhost:8000/v1/usage \
+  -H "authorization: Bearer $ATC_KEY"
+```
+
+Response:
+
+```json
+{
+  "api_key_fingerprint": "dee50c67",
+  "tier": "team",
+  "messages_this_month": 4217,
+  "tier_limit": 2000000,
+  "remaining": 1995783,
+  "reset_at": "2026-11-01T00:00:00Z",
+  "enforcement_enabled": true
+}
+```
+
+The endpoint never returns the raw API key — only its 8-character
+truncated SHA-256 fingerprint.
+
+### What counts toward the limit
+
+Only **approved** messages count. Rejected messages do **not** increment
+the counter:
+
+| Outcome | Counts against limit? |
+|---|---|
+| `200 OK` (approved) | ✅ Yes |
+| `422 SCHEMA_VALIDATION_FAILED` | ❌ No |
+| `422 REPEATED_PAYLOAD_LOOP` | ❌ No |
+| `422 CYCLIC_PAYLOAD_LOOP` | ❌ No |
+| `422 STEP_LIMIT_EXCEEDED` | ❌ No |
+| `401` (bad auth) | ❌ No |
+| `429 RATE_LIMIT_EXCEEDED` | ❌ No |
+
+This is deliberate. Governance rejections should never cost the customer.
+
+### When a key exceeds its limit
+
+The next request returns HTTP 429:
+
+```json
+{
+  "error": "TIER_LIMIT_EXCEEDED",
+  "message": "Tier 'free' limit of 10000 messages per month reached. Resets on 2026-11-01T00:00:00Z.",
+  "session_id": null,
+  "diagnostics": {
+    "tier": "free",
+    "used": 10000,
+    "limit": 10000,
+    "reset_at": "2026-11-01T00:00:00Z"
+  }
+}
+```
+
+The response also carries a `Retry-After` header with the number of
+seconds until the next calendar month (UTC).
+
+### Track-only mode
+
+Set `ATC_USAGE_ENFORCEMENT_ENABLED=false` to run in track-only mode.
+Messages are still counted and visible at `/v1/usage`, but no request
+is ever rejected for exceeding a limit. Useful for dry runs before
+opening a service to real traffic.
+
+### Storage backend
+
+Usage counters follow the same backend as sessions:
+
+- **Redis** when `ATC_REDIS_URL` is set — counters are shared across
+  replicas and survive restarts.
+- **In-memory** otherwise — counters reset on restart.
+
+Counters are keyed by `(api_key_fingerprint, year-month)`. A new month
+starts at zero automatically — no explicit reset needed.
+
+### Manually upgrading a customer
+
+Until a Stripe integration exists, upgrading a customer is a two-step
+operation:
+
+1. Add their API key to the appropriate tier variable in `.env`:
+   ```bash
+   ATC_PRO_API_KEYS=existing_free_key,new_pro_key
+   ```
+2. Restart the server.
+
+Their new limit takes effect immediately. No code changes, no
+database migration, no dashboard required.
+
+### What's NOT included yet
+
+- **Stripe integration** — no payment processing. Upgrades are manual.
+- **Self-serve tier changes** — a customer cannot upgrade themselves.
+- **Invoices / receipts / tax** — handled outside the middleware.
+- **Historical usage** — the API only returns the current month's count.
+
+All four are future features, triggered by real customer demand.
+
 ## Metrics
 
 AgentTrafficCop exposes Prometheus metrics at `GET /metrics`. No
