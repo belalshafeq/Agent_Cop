@@ -3,713 +3,673 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>agenttrafficcop — runtime guardrails for multi-agent systems</title>
-  <meta name="description" content="SHA-256 payload fingerprinting, schema validation, and a runtime circuit breaker for AI agents. pip install agenttrafficcop." />
-  <meta name="theme-color" content="#000000" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Ctext x='50' y='72' font-size='64' text-anchor='middle' fill='%2300ff41' font-family='monospace' font-weight='700'%3E%3E%3C/text%3E%3C/svg%3E" />
+  <title>AgentTrafficCop — Runtime guardrails for multi-agent systems</title>
+  <meta name="description" content="A runtime circuit breaker and schema shield for multi-agent systems. pip install agenttrafficcop." />
+  <meta name="theme-color" content="#ffffff" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3Crect x='20' y='20' width='60' height='60' fill='%23ff3b30'/%3E%3C/svg%3E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 
   <style>
     :root {
-      --bg: #000000;
-      --bg-2: #0a0a0a;
-      --green: #00ff41;
-      --green-dim: #00aa2a;
-      --green-faint: #005513;
-      --amber: #ffb000;
-      --red: #ff3b30;
-      --fg: #d0d0d0;
-      --fg-dim: #808080;
-      --fg-faint: #404040;
-      --line: #1a1a1a;
+      --bg: #ffffff;
+      --ink: #000000;
+      --ink-2: #1a1a1a;
+      --ink-3: #4a4a4a;
+      --ink-mute: #808080;
+      --ink-faint: #b8b8b8;
+      --line: #e5e5e5;
+      --line-strong: #000000;
+      --accent: #ff3b30;
+      --accent-dark: #cc2a20;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
       background: var(--bg);
-      color: var(--fg);
-      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
-      font-size: 14px;
-      line-height: 1.7;
+      color: var(--ink);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
-      font-feature-settings: 'ss01', 'cv01';
+      font-feature-settings: 'ss01', 'cv11', 'tnum';
     }
-    ::selection { background: var(--green); color: var(--bg); }
+    ::selection { background: var(--accent); color: var(--bg); }
 
-    ::-webkit-scrollbar { width: 10px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--green-faint); }
-    ::-webkit-scrollbar-thumb:hover { background: var(--green-dim); }
+    ::-webkit-scrollbar { width: 12px; }
+    ::-webkit-scrollbar-track { background: var(--bg); border-left: 1px solid var(--line); }
+    ::-webkit-scrollbar-thumb { background: var(--ink); }
 
-    /* ── Scanlines ── */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 1000;
-      background: repeating-linear-gradient(
-        0deg,
-        rgba(0, 255, 65, 0.03) 0px,
-        rgba(0, 255, 65, 0.03) 1px,
-        transparent 1px,
-        transparent 3px
-      );
-    }
-    /* ── Subtle vignette ── */
-    body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 999;
-      background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.4) 100%);
-    }
+    .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'ss01'; }
 
-    a { color: var(--green); text-decoration: none; border-bottom: 1px solid var(--green-faint); transition: all 0.15s; }
-    a:hover { background: var(--green); color: var(--bg); border-bottom-color: var(--green); }
+    a { color: var(--ink); text-decoration: none; }
+    a:hover { color: var(--accent); }
 
-    .green { color: var(--green); }
-    .green-dim { color: var(--green-dim); }
-    .amber { color: var(--amber); }
-    .red { color: var(--red); }
-    .dim { color: var(--fg-dim); }
-    .faint { color: var(--fg-faint); }
-    .bold { font-weight: 700; }
-
-    /* ── Blinking cursor ── */
-    .cursor::after {
-      content: '█';
-      color: var(--green);
-      animation: blink 1s steps(2) infinite;
-      margin-left: 2px;
-    }
-    @keyframes blink { 50% { opacity: 0; } }
-
-    /* ── Layout ── */
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 32px; }
-    .row { display: flex; gap: 32px; flex-wrap: wrap; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 0 40px; }
     .rule { border-top: 1px solid var(--line); }
-    .pad { padding: 80px 0; }
+    .rule-strong { border-top: 2px solid var(--ink); }
+    .pad { padding: 120px 0; }
 
     /* ── Reveal ── */
-    .reveal { opacity: 0; transform: translateY(8px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.8s cubic-bezier(0.16,1,0.3,1), transform 0.8s cubic-bezier(0.16,1,0.3,1); }
     .reveal.in { opacity: 1; transform: none; }
-    .d1 { transition-delay: 0.05s; }
-    .d2 { transition-delay: 0.1s; }
-    .d3 { transition-delay: 0.15s; }
+    .d1 { transition-delay: 0.08s; }
+    .d2 { transition-delay: 0.16s; }
+    .d3 { transition-delay: 0.24s; }
+    .d4 { transition-delay: 0.32s; }
 
-    /* ── Header bar ── */
+    /* ── Header ── */
     header {
       position: fixed; top: 0; left: 0; right: 0;
-      background: rgba(0,0,0,0.9);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: rgba(255,255,255,0.9);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
       border-bottom: 1px solid var(--line);
       z-index: 100;
-      padding: 10px 0;
-      font-size: 12px;
+      height: 64px;
     }
-    header .wrap { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-    .status-bar { display: flex; gap: 24px; color: var(--fg-dim); }
-    .status-bar .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: pulse 2s infinite; vertical-align: middle; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,65,0.5); }
-      50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(0,255,65,0); }
+    header .wrap { height: 100%; display: flex; align-items: center; justify-content: space-between; }
+    .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
+    .logo-mark { width: 20px; height: 20px; background: var(--ink); position: relative; }
+    .logo-mark::after { content: ''; position: absolute; inset: 4px 4px auto auto; width: 6px; height: 6px; background: var(--accent); }
+    nav.main-nav { display: flex; gap: 32px; font-size: 14px; font-weight: 500; }
+    nav.main-nav a { color: var(--ink-3); border: none; }
+    nav.main-nav a:hover { color: var(--ink); }
+    .header-cta {
+      font-size: 13px; font-weight: 600;
+      background: var(--ink); color: var(--bg);
+      padding: 10px 20px;
+      transition: background 0.15s;
     }
-    header nav { display: flex; gap: 20px; }
-    header nav a { border: none; color: var(--fg-dim); padding: 2px 0; }
-    header nav a:hover { background: transparent; color: var(--green); }
-    @media (max-width: 640px) { header nav { display: none; } }
+    .header-cta:hover { background: var(--accent); color: var(--bg); }
+    @media (max-width: 780px) { nav.main-nav { display: none; } }
 
     /* ── Hero ── */
-    .hero { padding: 140px 0 80px; }
-    .hero pre {
-      font-family: inherit;
-      font-size: clamp(11px, 1.6vw, 15px);
-      line-height: 1.5;
-      color: var(--green-dim);
-      overflow-x: auto;
-      white-space: pre;
-      margin-bottom: 32px;
+    .hero { padding: 180px 0 100px; }
+    .hero-label {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.15em;
+      margin-bottom: 40px;
+      color: var(--ink-3);
     }
+    .hero-label::before { content: ''; width: 24px; height: 1px; background: var(--ink); }
+
     .hero-title {
-      font-size: clamp(2.5rem, 8vw, 6rem);
-      font-weight: 700;
-      line-height: 0.95;
-      letter-spacing: -0.03em;
-      color: var(--fg);
-      margin: 24px 0;
+      font-size: clamp(3rem, 9vw, 8.5rem);
+      font-weight: 800;
+      line-height: 0.9;
+      letter-spacing: -0.05em;
+      color: var(--ink);
+      margin-bottom: 48px;
     }
-    .hero-title .accent { color: var(--green); }
-    .hero-sub { font-size: clamp(0.9rem, 1.5vw, 1.05rem); color: var(--fg-dim); max-width: 640px; margin-bottom: 40px; }
+    .hero-title .red { color: var(--accent); }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: end;
+      margin-top: 60px;
+      padding-top: 60px;
+      border-top: 1px solid var(--line);
+    }
+    .hero-sub {
+      font-size: clamp(1rem, 1.4vw, 1.25rem);
+      line-height: 1.6;
+      color: var(--ink-3);
+      max-width: 480px;
+      font-weight: 400;
+    }
+    .hero-sub strong { color: var(--ink); font-weight: 600; }
+
+    .install-block { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
+    .install {
+      display: inline-flex; align-items: center; gap: 14px;
+      padding: 16px 22px;
+      background: var(--ink); color: var(--bg);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s;
+    }
+    .install:hover { background: var(--accent); }
+    .install .prompt { opacity: 0.5; }
+    .install .copy { opacity: 0.5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; margin-left: 8px; }
+    .install:hover .copy { opacity: 1; }
+
     .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
     .btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 14px 24px;
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      border: 1px solid var(--green-faint);
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 16px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      border: 1px solid var(--ink);
       background: transparent;
-      color: var(--green);
+      color: var(--ink);
       cursor: pointer;
       transition: all 0.15s;
-      text-decoration: none;
-      border-bottom: 1px solid var(--green-faint);
     }
-    .btn:hover { background: var(--green); color: var(--bg); border-color: var(--green); }
-    .btn-primary { background: var(--green); color: var(--bg); border-color: var(--green); }
-    .btn-primary:hover { background: var(--bg); color: var(--green); }
+    .btn:hover { background: var(--ink); color: var(--bg); }
+    .btn-primary { background: var(--ink); color: var(--bg); }
+    .btn-primary:hover { background: var(--accent); border-color: var(--accent); }
 
-    /* ── Install command ── */
-    .install {
-      display: inline-flex; align-items: center; gap: 12px;
-      padding: 12px 18px;
-      background: var(--bg-2);
-      border: 1px solid var(--green-faint);
-      font-size: 13px;
-      cursor: pointer;
-      transition: all 0.15s;
-      margin-bottom: 24px;
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+      .wrap { padding: 0 24px; }
+      .pad { padding: 80px 0; }
     }
-    .install:hover { border-color: var(--green); background: #0f0f0f; }
-    .install .prompt { color: var(--green); user-select: none; }
-    .install .cmd { color: var(--fg); }
-    .install .copy { color: var(--fg-faint); font-size: 11px; margin-left: 8px; }
-    .install:hover .copy { color: var(--green); }
 
-    /* ── Section labels ── */
-    .label {
-      display: flex; align-items: center; gap: 12px;
-      font-size: 11px;
-      color: var(--fg-faint);
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      margin-bottom: 32px;
+    /* ── Section structure ── */
+    .section-head { display: flex; align-items: baseline; gap: 24px; margin-bottom: 60px; }
+    .section-head .num {
+      font-size: 12px; font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--ink-mute);
+      letter-spacing: 0.05em;
     }
-    .label::before { content: '>'; color: var(--green); }
-    .label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+    .section-head .title {
+      font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.15em;
+      color: var(--ink);
+    }
+    .section-head .line { flex: 1; height: 1px; background: var(--line); align-self: center; }
+    .section-head .meta { font-size: 11px; color: var(--ink-mute); font-family: 'JetBrains Mono', monospace; }
 
-    .section-title { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; color: var(--fg); margin-bottom: 24px; }
-    .section-title .accent { color: var(--green); }
+    .section-title {
+      font-size: clamp(2rem, 5vw, 4.5rem);
+      font-weight: 800;
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      margin-bottom: 60px;
+      color: var(--ink);
+    }
+    .section-title .red { color: var(--accent); }
 
-    /* ── Terminal demo ── */
+    /* ── Terminal ── */
     .terminal {
-      background: #060606;
-      border: 1px solid var(--line);
-      margin: 32px 0;
+      background: #0a0a0a;
+      color: #e8e8e8;
       overflow: hidden;
+      border-radius: 0;
+      box-shadow: 0 20px 60px -20px rgba(0,0,0,0.25);
     }
     .terminal-bar {
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #0a0a0a;
+      padding: 12px 18px;
+      background: #141414;
+      border-bottom: 1px solid #222;
       display: flex; align-items: center; gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      color: var(--fg-faint);
+      color: #666;
     }
-    .terminal-bar .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .terminal-bar .dot { width: 11px; height: 11px; border-radius: 50%; }
     .terminal-body {
-      padding: 20px;
-      font-size: clamp(11px, 1.4vw, 13px);
-      line-height: 1.7;
+      padding: 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.85;
       overflow-x: auto;
       white-space: pre;
     }
-    .terminal-body .line { display: block; }
-    .terminal-body .say { color: var(--green); }
-    .terminal-body .label { color: var(--fg-faint); }
-    .terminal-body .ok { color: var(--green); }
-    .terminal-body .fail { color: var(--red); }
-    .terminal-body .warn { color: var(--amber); }
-    .terminal-body .dim { color: var(--fg-faint); }
-    .terminal-body .cmd-line::before { content: '$ '; color: var(--green); }
+    .terminal-body .ok { color: #22c55e; }
+    .terminal-body .fail { color: #ff3b30; }
+    .terminal-body .dim { color: #666; }
+    .terminal-body .warn { color: #f59e0b; }
+    .terminal-body .info { color: #60a5fa; }
 
-    /* ── Numbered feature list ── */
-    .feature {
-      display: grid;
-      grid-template-columns: 60px 1fr;
-      gap: 24px;
-      padding: 28px 0;
-      border-top: 1px solid var(--line);
-      transition: padding 0.2s;
-    }
-    .feature:last-child { border-bottom: 1px solid var(--line); }
-    .feature:hover { padding-left: 12px; }
+    /* ── Feature list ── */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .feature { background: var(--bg); padding: 48px 40px; display: flex; flex-direction: column; min-height: 320px; transition: background 0.2s; }
+    .feature:hover { background: #fafafa; }
     .feature .num {
-      font-size: 14px;
-      color: var(--green);
-      font-weight: 500;
-      padding-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 32px;
     }
     .feature h3 {
-      font-size: 18px;
+      font-size: 26px;
       font-weight: 700;
-      color: var(--fg);
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-bottom: 16px;
+      color: var(--ink);
+    }
+    .feature p { font-size: 15px; line-height: 1.6; color: var(--ink-3); }
+    @media (max-width: 900px) { .features { grid-template-columns: 1fr; } }
+
+    /* ── Numbers ── */
+    .numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .stat { background: var(--bg); padding: 40px 32px; }
+    .stat .big {
+      font-size: clamp(2.5rem, 5vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      color: var(--ink);
+      margin-bottom: 16px;
+    }
+    .stat .big .red { color: var(--accent); }
+    .stat .label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--ink-mute);
       margin-bottom: 8px;
-      letter-spacing: -0.01em;
     }
-    .feature p { font-size: 13px; color: var(--fg-dim); line-height: 1.7; max-width: 560px; }
+    .stat .desc { font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+    @media (max-width: 900px) { .numbers { grid-template-columns: repeat(2, 1fr); } }
 
-    /* ── Numbers grid ── */
-    .grid-num {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 1px;
-      background: var(--line);
-      border: 1px solid var(--line);
-    }
-    .grid-num > div { background: var(--bg); padding: 24px; }
-    .grid-num .big { font-size: clamp(2rem, 4vw, 3rem); font-weight: 700; color: var(--green); line-height: 1; letter-spacing: -0.02em; margin-bottom: 8px; }
-    .grid-num .small { font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
-    .grid-num .desc { font-size: 12px; color: var(--fg-dim); }
+    /* ── Pricing ── */
+    .pricing { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    .plan { background: var(--bg); padding: 40px 32px; display: flex; flex-direction: column; transition: background 0.2s; }
+    .plan:hover { background: #fafafa; }
+    .plan.featured { background: var(--ink); color: var(--bg); }
+    .plan.featured:hover { background: var(--ink-2); }
+    .plan.featured .plan-name,
+    .plan.featured .plan-desc,
+    .plan.featured .plan-period { color: rgba(255,255,255,0.6); }
+    .plan.featured .plan-price { color: var(--bg); }
+    .plan.featured li { color: rgba(255,255,255,0.85); }
+    .plan.featured .plan-badge { background: var(--accent); color: #fff; }
+    .plan-name { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.15em; color: var(--ink-mute); margin-bottom: 24px; }
+    .plan-badge { display: inline-block; padding: 3px 8px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; background: var(--ink); color: var(--bg); margin-bottom: 20px; width: fit-content; }
+    .plan-price { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--ink); margin-bottom: 4px; }
+    .plan-price span { font-size: 14px; font-weight: 500; color: var(--ink-mute); }
+    .plan-period { font-size: 12px; color: var(--ink-mute); margin-bottom: 32px; }
+    .plan ul { list-style: none; margin: 0 0 32px; padding: 0; flex: 1; }
+    .plan li { font-size: 14px; color: var(--ink-3); padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.15); }
+    .plan.featured li { border-bottom-color: rgba(255,255,255,0.1); }
+    .plan li:last-child { border-bottom: none; }
+    .plan .btn { width: 100%; justify-content: center; padding: 14px; font-size: 13px; }
+    .plan.featured .btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .plan.featured .btn:hover { background: #fff; color: var(--ink); border-color: #fff; }
+    @media (max-width: 900px) { .pricing { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .pricing { grid-template-columns: 1fr; } }
 
-    /* ── Pricing table ── */
-    .pricing {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1px;
-      background: var(--line);
-      border: 1px solid var(--line);
-      margin-top: 40px;
-    }
-    .plan { background: var(--bg); padding: 32px 24px; position: relative; }
-    .plan.recommended { background: #061a08; border: 1px solid var(--green); margin: -1px; position: relative; z-index: 2; }
-    .plan.recommended::before {
-      content: '◆ RECOMMENDED';
-      position: absolute;
-      top: -1px; right: -1px;
-      background: var(--green);
-      color: var(--bg);
-      font-size: 10px;
-      font-weight: 700;
-      padding: 4px 8px;
-      letter-spacing: 0.1em;
-    }
-    .plan .name { font-size: 12px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 16px; }
-    .plan .price { font-size: 2.5rem; font-weight: 700; color: var(--fg); line-height: 1; letter-spacing: -0.02em; margin-bottom: 4px; }
-    .plan .price span { font-size: 0.9rem; color: var(--fg-dim); font-weight: 400; }
-    .plan .period { font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 24px; }
-    .plan ul { list-style: none; margin-bottom: 24px; }
-    .plan li { font-size: 13px; color: var(--fg-dim); padding: 4px 0; }
-    .plan li::before { content: '· '; color: var(--green); }
-    .plan .btn { width: 100%; justify-content: center; }
-
-    /* ── CTA section ── */
-    .cta-section {
-      padding: 100px 0;
-      border-top: 1px solid var(--line);
-      background: var(--bg-2);
+    /* ── Big CTA ── */
+    .cta {
+      padding: 140px 0;
       text-align: center;
+      border-top: 1px solid var(--line);
     }
-    .cta-section h2 { font-size: clamp(2rem, 6vw, 4rem); font-weight: 700; line-height: 1; letter-spacing: -0.03em; margin-bottom: 24px; }
-    .cta-section h2 .accent { color: var(--green); }
+    .cta h2 {
+      font-size: clamp(3rem, 8vw, 7rem);
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      line-height: 0.95;
+      margin-bottom: 32px;
+    }
+    .cta h2 .red { color: var(--accent); }
+    .cta p { font-size: 18px; color: var(--ink-3); margin-bottom: 48px; }
+    .cta .install { font-size: 15px; padding: 20px 28px; }
 
     /* ── Footer ── */
-    footer {
-      padding: 32px 0;
-      border-top: 1px solid var(--line);
-      font-size: 11px;
-      color: var(--fg-faint);
-      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px;
-    }
-    footer a { color: var(--fg-faint); border: none; }
-    footer a:hover { background: transparent; color: var(--green); }
-
-    /* ── Responsive ── */
-    @media (max-width: 640px) {
-      .wrap { padding: 0 20px; }
-      .pad { padding: 60px 0; }
-      .hero { padding: 100px 0 60px; }
-      .feature { grid-template-columns: 40px 1fr; gap: 16px; }
-      .feature .num { font-size: 12px; }
-    }
+    footer { padding: 40px 0; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-mute); }
+    footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
+    footer a { color: var(--ink-3); }
+    footer a:hover { color: var(--accent); }
+    footer .meta { display: flex; gap: 24px; }
 
     /* ── Reduced motion ── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
       .reveal { opacity: 1; transform: none; }
     }
-
-    /* ── ASCII art animation ── */
-    .ascii-art {
-      font-size: 10px;
-      line-height: 1;
-      color: var(--green-faint);
-      white-space: pre;
-      overflow-x: auto;
-      user-select: none;
-    }
   </style>
 </head>
-
 <body>
 
-  <!-- ═══════════════════════════════════════════════
-       HEADER
-       ═══════════════════════════════════════════════ -->
+  <!-- HEADER -->
   <header>
     <div class="wrap">
-      <div class="status-bar">
-        <span><span class="pulse"></span>ATC v0.1.0</span>
-        <span class="faint">on PyPI</span>
-      </div>
-      <nav>
-        <a href="#features">features</a>
-        <a href="#demo">demo</a>
-        <a href="#how">how</a>
-        <a href="#pricing">pricing</a>
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">github ↗</a>
+      <a href="#" class="logo">
+        <span class="logo-mark"></span>
+        <span>AgentTrafficCop</span>
+      </a>
+      <nav class="main-nav">
+        <a href="#features">Features</a>
+        <a href="#demo">Demo</a>
+        <a href="#how">Integrate</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">Docs</a>
       </nav>
+      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="header-cta">
+        View on GitHub
+      </a>
     </div>
   </header>
 
-  <!-- ═══════════════════════════════════════════════
-       HERO
-       ═══════════════════════════════════════════════ -->
+  <!-- HERO -->
   <section class="hero">
     <div class="wrap">
-      <div class="reveal">
-        <pre class="ascii-art">   _                _   _____              _  __  __        _____
-  /_\  __ _ ___ _ _| |_|_   _| _ _ __ _ __| |/ _|/ _|___ __|_   _|__ _ __
- / _ \/ _` / -_) ' \  _|| || '_/ _` / _| / / _|  _/ -_) _| | |/ _ \ '_ \
-/_/ \_\__, \___|_||_\__||_||_| \__,_\__|_\_\_| |_| \___\__| |_|\___/ .__/
-      |___/                                                         |_|
-</pre>
-      </div>
+      <div class="hero-label reveal">Runtime guardrails for AI agents</div>
 
-      <div class="reveal d1">
-        <h1 class="hero-title">
-          catch <span class="accent">loops</span><br/>
-          before they<br/>
-          burn tokens<span class="cursor"></span>
-        </h1>
-      </div>
+      <h1 class="hero-title reveal d1">
+        Stop the loop.<br/>
+        Save the <span class="red">budget.</span>
+      </h1>
 
-      <div class="reveal d2">
-        <p class="hero-sub">
-          A runtime circuit breaker for multi-agent systems.
-          Sits between your agents. Fingerprints every payload with SHA-256.
-          Trips the breaker before $400 becomes $4,000.
-        </p>
-      </div>
-
-      <div class="reveal d3">
-        <button type="button" class="install" onclick="copyInstall(this)">
-          <span class="prompt">$</span>
-          <span class="cmd">pip install agenttrafficcop</span>
-          <span class="copy">[copy]</span>
-        </button>
-      </div>
-
-      <div class="reveal d3 hero-actions">
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn btn-primary">
-          <span>→</span> view source
-        </a>
-        <a href="#demo" class="btn">
-          <span>→</span> see the demo
-        </a>
+      <div class="hero-grid">
+        <div class="reveal d2">
+          <p class="hero-sub">
+            A <strong>runtime circuit breaker</strong> for multi-agent systems.
+            Sits between your agents, fingerprints every payload with SHA-256,
+            and trips before $400 becomes $4,000.
+          </p>
+        </div>
+        <div class="install-block reveal d3">
+          <button type="button" class="install" onclick="copyInstall(this)">
+            <span class="prompt">$</span>
+            <span>pip install agenttrafficcop</span>
+            <span class="copy">copy</span>
+          </button>
+          <div class="hero-actions">
+            <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn btn-primary">View source</a>
+            <a href="#demo" class="btn">See the demo</a>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       DEMO
-       ═══════════════════════════════════════════════ -->
+  <!-- DEMO -->
   <section id="demo" class="pad rule">
     <div class="wrap">
-      <div class="label reveal">live output — python demo.py</div>
+      <div class="section-head reveal">
+        <span class="num">01</span>
+        <span class="title">Live demo</span>
+        <span class="line"></span>
+        <span class="meta">python demo.py</span>
+      </div>
 
-      <div class="terminal reveal d1">
+      <h2 class="section-title reveal">
+        Two agents. One loop.<br/>
+        The breaker trips.
+      </h2>
+
+      <div class="terminal reveal d2">
         <div class="terminal-bar">
           <span class="dot" style="background:#ff5f57"></span>
           <span class="dot" style="background:#febc2e"></span>
           <span class="dot" style="background:#28c840"></span>
-          <span style="margin-left: 12px;">bash — 80x24 — agenttrafficcop</span>
+          <span style="margin-left: 12px;">python demo.py</span>
         </div>
-        <div class="terminal-body"><span class="line cmd-line">python demo.py</span>
-<span class="line">&nbsp;</span>
-<span class="line dim">════════════════════════════════════════════════════════════</span>
-<span class="line dim">RUN 1: WITHOUT AgentTrafficCop</span>
-<span class="line dim">════════════════════════════════════════════════════════════</span>
-<span class="line">&nbsp;</span>
-<span class="line">  <span class="green">coder</span>    → reviewer : {'diff': 'rename foo to bar'}</span>
-<span class="line">  <span class="green">reviewer</span> → coder    : {'feedback': 'add a docstring'}</span>
-<span class="line">  <span class="green">coder</span>    → reviewer : {'diff': 'add null check'}</span>
-<span class="line">  <span class="green">reviewer</span> → coder    : {'feedback': 'handle empty case'}</span>
-<span class="line">  <span class="dim">... 20 more rounds ...</span>
-<span class="line">&nbsp;</span>
-<span class="line red">  ✗ no breaker. loop ran 24 messages. cost: $0.10</span>
-<span class="line">&nbsp;</span>
-<span class="line dim">════════════════════════════════════════════════════════════</span>
-<span class="line dim">RUN 2: WITH AgentTrafficCop</span>
-<span class="line dim">════════════════════════════════════════════════════════════</span>
-<span class="line">&nbsp;</span>
-<span class="line">  <span class="green">coder</span>    → reviewer : {...}  <span class="ok">✓ step=1</span></span>
-<span class="line">  <span class="green">reviewer</span> → coder    : {...}  <span class="ok">✓ step=2</span></span>
-<span class="line">  <span class="green">coder</span>    → reviewer : {...}  <span class="ok">✓ step=3</span></span>
-<span class="line">  <span class="green">reviewer</span> → coder    : {...}  <span class="fail">✗ CYCLIC_PAYLOAD_LOOP</span></span>
-<span class="line">&nbsp;</span>
-<span class="line red bold">  🛑 CIRCUIT BREAKER TRIPPED</span>
-<span class="line red">     error_code: CYCLIC_PAYLOAD_LOOP</span>
-<span class="line red">     session:    demo-loop</span>
-<span class="line red">     step:       8</span>
-<span class="line red">     cycle_len:  2</span>
-<span class="line red">     repeats:    3</span>
-<span class="line">&nbsp;</span>
-<span class="line ok">  ✓ session halted after 8 messages. cost: $0.03</span>
-<span class="line ok">  ✓ saved vs run 1: $0.07</span>
-<span class="line">&nbsp;</span>
-<span class="line cmd-line cursor"></span></div>
+        <div class="terminal-body"><span class="dim">$ python demo.py</span>
+
+<span class="dim">──────────────────────────────────────────────────────</span>
+<span class="dim">RUN 1 · WITHOUT AgentTrafficCop</span>
+<span class="dim">──────────────────────────────────────────────────────</span>
+
+  <span class="info">Coder</span>     → Reviewer : {'diff': 'rename foo to bar'}
+  <span class="info">Reviewer</span>  → Coder    : {'feedback': 'add a docstring'}
+  <span class="info">Coder</span>     → Reviewer : {'diff': 'add null check'}
+  <span class="info">Reviewer</span>  → Coder    : {'feedback': 'handle empty case'}
+  <span class="dim">... 20 more rounds ...</span>
+
+  <span class="fail">✗ no breaker · 24 messages · cost: $0.10</span>
+
+<span class="dim">──────────────────────────────────────────────────────</span>
+<span class="dim">RUN 2 · WITH AgentTrafficCop</span>
+<span class="dim">──────────────────────────────────────────────────────</span>
+
+  <span class="info">Coder</span>     → Reviewer : {...}  <span class="ok">✓ step=1</span>
+  <span class="info">Reviewer</span>  → Coder    : {...}  <span class="ok">✓ step=2</span>
+  <span class="info">Coder</span>     → Reviewer : {...}  <span class="ok">✓ step=3</span>
+  <span class="info">Reviewer</span>  → Coder    : {...}  <span class="fail">✗ CYCLIC_PAYLOAD_LOOP</span>
+
+  <span class="fail">🛑 CIRCUIT BREAKER TRIPPED</span>
+  <span class="fail">   error_code : CYCLIC_PAYLOAD_LOOP</span>
+  <span class="fail">   session    : demo-loop</span>
+  <span class="fail">   step       : 8</span>
+  <span class="fail">   cycle_len  : 2</span>
+  <span class="fail">   repeats    : 3</span>
+
+  <span class="ok">✓ session halted · 8 messages · cost: $0.03</span>
+  <span class="ok">✓ saved vs run 1: $0.07</span>
+</div>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       FEATURES
-       ═══════════════════════════════════════════════ -->
+  <!-- FEATURES -->
   <section id="features" class="pad rule">
     <div class="wrap">
-      <div class="label reveal">what it does</div>
-      <h2 class="section-title reveal d1">
-        three things,<br/>
-        sitting between<br/>
-        your <span class="accent">agents</span>.
-      </h2>
+      <div class="section-head reveal">
+        <span class="num">02</span>
+        <span class="title">The solution</span>
+        <span class="line"></span>
+        <span class="meta">three primitives</span>
+      </div>
 
-      <div class="reveal d2" style="margin-top: 40px;">
-        <div class="feature">
-          <div class="num">[01]</div>
-          <div>
-            <h3>schema shield</h3>
-            <p>every handoff validated against a strict pydantic contract. malformed payloads get a structured 422 before reaching the next agent.</p>
-          </div>
-        </div>
-        <div class="feature">
-          <div class="num">[02]</div>
-          <div>
-            <h3>loop detection</h3>
-            <p>sha-256 fingerprinting on every payload. identical repeats trip the breaker. a↔b ping-pongs trip the breaker. step counters catch the rest.</p>
-          </div>
-        </div>
-        <div class="feature">
-          <div class="num">[03]</div>
-          <div>
-            <h3>runtime breaker</h3>
-            <p>thresholds breach → response carries structured diagnostics. your orchestrator decides: halt, alert, or escalate.</p>
-          </div>
-        </div>
+      <h2 class="section-title reveal">
+        Three things, sitting<br/>
+        between your <span class="red">agents.</span>
+      </h2>
+    </div>
+
+    <div class="features reveal d2">
+      <div class="feature">
+        <div class="num">01</div>
+        <h3>Schema shield</h3>
+        <p>Every handoff validated against a strict Pydantic contract. Malformed payloads get a structured 422 before they reach the next agent.</p>
+      </div>
+      <div class="feature">
+        <div class="num">02</div>
+        <h3>Loop detection</h3>
+        <p>SHA-256 fingerprinting on every payload. Identical repeats and A↔B ping-pongs trip the breaker. Step counters catch the rest.</p>
+      </div>
+      <div class="feature">
+        <div class="num">03</div>
+        <h3>Runtime breaker</h3>
+        <p>Thresholds breach, response carries structured diagnostics. Your orchestrator decides: halt, alert, or escalate.</p>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       HOW
-       ═══════════════════════════════════════════════ -->
+  <!-- HOW -->
   <section id="how" class="pad rule">
     <div class="wrap">
-      <div class="label reveal">integration</div>
-      <h2 class="section-title reveal d1">
-        five lines to<br/>
-        add it to your<br/>
-        <span class="accent">orchestrator</span>.
-      </h2>
-
-      <div class="terminal reveal d2" style="margin-top: 40px;">
-        <div class="terminal-bar">
-          <span style="color: var(--fg-faint);">your_orchestrator.py</span>
-          <span style="margin-left: auto; color: var(--fg-faint);">python</span>
-        </div>
-        <div class="terminal-body"><span class="line"><span style="color:#c084fc">from</span> agenttrafficcop <span style="color:#c084fc">import</span> Guard, LoopDetected</span>
-<span class="line">&nbsp;</span>
-<span class="line">guard = Guard(url=<span style="color:#ffb000">"http://localhost:8000"</span>, api_key=<span style="color:#ffb000">"your-key"</span>)</span>
-<span class="line">&nbsp;</span>
-<span class="line"><span style="color:#c084fc">try</span>:</span>
-<span class="line">    result = <span style="color:#c084fc">await</span> guard.check(</span>
-<span class="line">        session_id=<span style="color:#ffb000">"run-42"</span>,</span>
-<span class="line">        sender=<span style="color:#ffb000">"coder"</span>,</span>
-<span class="line">        recipient=<span style="color:#ffb000">"reviewer"</span>,</span>
-<span class="line">        payload={<span style="color:#ffb000">"diff"</span>: <span style="color:#ffb000">"fix typo"</span>},</span>
-<span class="line">    )</span>
-<span class="line">    print(<span style="color:#ffb000">"approved at step"</span>, result.step)</span>
-<span class="line"><span style="color:#c084fc">except</span> LoopDetected <span style="color:#c084fc">as</span> e:</span>
-<span class="line">    print(<span style="color:#ffb000">"loop caught:"</span>, e.error_code)</span>
-<span class="line cmd-line cursor"></span></div>
+      <div class="section-head reveal">
+        <span class="num">03</span>
+        <span class="title">Integration</span>
+        <span class="line"></span>
+        <span class="meta">five lines</span>
       </div>
 
-      <p class="reveal d3 dim" style="margin-top: 24px; font-size: 12px;">
-        works with langgraph, crewai, autogen, or raw asyncio. runs as a standalone service — call it before any handoff.
+      <h2 class="section-title reveal">
+        Five lines to add it<br/>
+        to your <span class="red">orchestrator.</span>
+      </h2>
+
+      <div class="terminal reveal d2">
+        <div class="terminal-bar">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c840"></span>
+          <span style="margin-left: 12px;">your_orchestrator.py</span>
+        </div>
+        <div class="terminal-body"><span class="info">from</span> agenttrafficcop <span class="info">import</span> Guard, LoopDetected
+
+guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<span class="warn">"your-key"</span>)
+
+<span class="info">try</span>:
+    result = <span class="info">await</span> guard.check(
+        session_id=<span class="warn">"run-42"</span>,
+        sender=<span class="warn">"coder"</span>,
+        recipient=<span class="warn">"reviewer"</span>,
+        payload={<span class="warn">"diff"</span>: <span class="warn">"fix typo"</span>},
+    )
+    print(<span class="warn">"approved at step"</span>, result.step)
+<span class="info">except</span> LoopDetected <span class="info">as</span> e:
+    print(<span class="warn">"loop caught:"</span>, e.error_code)</div>
+      </div>
+
+      <p class="reveal d3" style="margin-top: 32px; color: var(--ink-3); font-size: 15px; max-width: 640px;">
+        Works with LangGraph, CrewAI, AutoGen, or raw asyncio. Runs as a standalone service — call it before any handoff.
       </p>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       NUMBERS
-       ═══════════════════════════════════════════════ -->
+  <!-- NUMBERS -->
   <section class="pad rule">
     <div class="wrap">
-      <div class="label reveal">built for production</div>
-      <h2 class="section-title reveal d1">
-        tested. observable.<br/>
-        <span class="accent">hardened</span>.
+      <div class="section-head reveal">
+        <span class="num">04</span>
+        <span class="title">Built for production</span>
+        <span class="line"></span>
+      </div>
+
+      <h2 class="section-title reveal">
+        Tested, observable,<br/>
+        <span class="red">hardened.</span>
       </h2>
 
-      <div class="grid-num reveal d2" style="margin-top: 40px;">
-        <div>
+      <div class="numbers reveal d2">
+        <div class="stat">
           <div class="big">168</div>
-          <div class="small">tests</div>
-          <div class="desc">passing in CI, every commit</div>
+          <div class="label">Tests</div>
+          <div class="desc">Passing in CI on every commit</div>
         </div>
-        <div>
-          <div class="big">&lt;1<span style="font-size:1.2rem; color: var(--fg-dim);">ms</span></div>
-          <div class="small">overhead</div>
-          <div class="desc">per handoff, canonical JSON</div>
+        <div class="stat">
+          <div class="big">&lt;1<span style="font-size:1.5rem; color: var(--ink-mute);">ms</span></div>
+          <div class="label">Overhead</div>
+          <div class="desc">Per handoff, canonical JSON payload</div>
         </div>
-        <div>
-          <div class="big">redis</div>
-          <div class="small">or memory</div>
-          <div class="desc">pluggable session store</div>
+        <div class="stat">
+          <div class="big">Redis</div>
+          <div class="label">Or memory</div>
+          <div class="desc">Pluggable session store, one env var</div>
         </div>
-        <div>
-          <div class="big">mit</div>
-          <div class="small">license</div>
-          <div class="desc">open source, on pypi</div>
+        <div class="stat">
+          <div class="big">MIT</div>
+          <div class="label">License</div>
+          <div class="desc">Open source, on PyPI</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       PRICING
-       ═══════════════════════════════════════════════ -->
+  <!-- PRICING -->
   <section id="pricing" class="pad rule">
     <div class="wrap">
-      <div class="label reveal">pricing</div>
-      <h2 class="section-title reveal d1">
-        free to start.<br/>
-        scale when<br/>
-        you <span class="accent">need to</span>.
+      <div class="section-head reveal">
+        <span class="num">05</span>
+        <span class="title">Pricing</span>
+        <span class="line"></span>
+        <span class="meta">planned tiers</span>
+      </div>
+
+      <h2 class="section-title reveal">
+        Free to start.<br/>
+        Scale when you <span class="red">need to.</span>
       </h2>
-      <p class="reveal d2 dim" style="font-size: 13px; margin-bottom: 40px; max-width: 520px;">
-        the middleware and sdk are open source. the managed service is coming soon — pricing below is the plan.
+
+      <p class="reveal d1" style="font-size: 17px; color: var(--ink-3); margin-bottom: 60px; max-width: 560px;">
+        The middleware and SDK are open source. The managed service is coming soon — pricing below is the plan.
       </p>
+    </div>
 
-      <div class="pricing reveal d3">
-        <div class="plan">
-          <div class="name">free</div>
-          <div class="price">$0</div>
-          <div class="period">forever</div>
-          <ul>
-            <li>10,000 messages / mo</li>
-            <li>single instance</li>
-            <li>community support</li>
-            <li>self-hosted</li>
-          </ul>
-          <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn">get started →</a>
-        </div>
+    <div class="pricing reveal d2">
+      <div class="plan">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">$0</div>
+        <div class="plan-period">forever</div>
+        <ul>
+          <li>10,000 messages / month</li>
+          <li>Single instance</li>
+          <li>Community support</li>
+          <li>Self-hosted</li>
+        </ul>
+        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn">Get started</a>
+      </div>
 
-        <div class="plan recommended">
-          <div class="name">pro</div>
-          <div class="price">$49<span>/mo</span></div>
-          <div class="period">coming soon</div>
-          <ul>
-            <li>250,000 messages / mo</li>
-            <li>multi-instance</li>
-            <li>prometheus metrics</li>
-            <li>30-day audit log</li>
-            <li>email support</li>
-          </ul>
-          <a href="mailto:hello@agenttrafficcop.com?subject=Pro%20plan" class="btn btn-primary">join waitlist →</a>
-        </div>
+      <div class="plan featured">
+        <div class="plan-badge">Recommended</div>
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">$49<span>/mo</span></div>
+        <div class="plan-period">coming soon</div>
+        <ul>
+          <li>250,000 messages / month</li>
+          <li>Multi-instance</li>
+          <li>Prometheus metrics</li>
+          <li>30-day audit log</li>
+          <li>Email support</li>
+        </ul>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Pro%20plan" class="btn">Join waitlist</a>
+      </div>
 
-        <div class="plan">
-          <div class="name">team</div>
-          <div class="price">$199<span>/mo</span></div>
-          <div class="period">coming soon</div>
-          <ul>
-            <li>2M messages / mo</li>
-            <li>1-year audit log</li>
-            <li>priority support</li>
-            <li>slack connect</li>
-          </ul>
-          <a href="mailto:hello@agenttrafficcop.com?subject=Team%20plan" class="btn">contact →</a>
-        </div>
+      <div class="plan">
+        <div class="plan-name">Team</div>
+        <div class="plan-price">$199<span>/mo</span></div>
+        <div class="plan-period">coming soon</div>
+        <ul>
+          <li>2M messages / month</li>
+          <li>1-year audit log</li>
+          <li>Priority support</li>
+          <li>Slack Connect</li>
+        </ul>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Team%20plan" class="btn">Contact us</a>
+      </div>
 
-        <div class="plan">
-          <div class="name">enterprise</div>
-          <div class="price">custom</div>
-          <div class="period">talk to us</div>
-          <ul>
-            <li>unlimited messages</li>
-            <li>sso / saml</li>
-            <li>on-prem or vpc</li>
-            <li>dpa, baa, slas</li>
-          </ul>
-          <a href="mailto:hello@agenttrafficcop.com?subject=Enterprise%20inquiry" class="btn">contact →</a>
-        </div>
+      <div class="plan">
+        <div class="plan-name">Enterprise</div>
+        <div class="plan-price">Custom</div>
+        <div class="plan-period">talk to us</div>
+        <ul>
+          <li>Unlimited messages</li>
+          <li>SSO / SAML</li>
+          <li>On-prem or VPC</li>
+          <li>DPA, BAA, custom SLAs</li>
+        </ul>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Enterprise%20inquiry" class="btn">Contact us</a>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       CTA
-       ═══════════════════════════════════════════════ -->
-  <section class="cta-section">
+  <!-- CTA -->
+  <section class="cta">
     <div class="wrap">
-      <h2 class="reveal">
-        try it in <span class="accent">sixty seconds</span>.
-      </h2>
-      <p class="reveal d1 dim" style="margin-bottom: 32px; font-size: 14px;">
-        one command. three lines. zero runtime dependencies.
-      </p>
-      <div class="reveal d2" style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
-        <button type="button" class="install" onclick="copyInstall(this)" style="margin-bottom: 0;">
+      <h2 class="reveal">Try it in <span class="red">sixty seconds.</span></h2>
+      <p class="reveal d1">One command. Three lines. Zero runtime dependencies.</p>
+      <div class="reveal d2" style="display: flex; justify-content: center;">
+        <button type="button" class="install" onclick="copyInstall(this)">
           <span class="prompt">$</span>
-          <span class="cmd">pip install agenttrafficcop</span>
-          <span class="copy">[copy]</span>
+          <span>pip install agenttrafficcop</span>
+          <span class="copy">copy</span>
         </button>
       </div>
-      <div class="reveal d3" style="margin-top: 32px; display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; font-size: 12px;">
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">github ↗</a>
-        <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">pypi ↗</a>
-        <a href="mailto:hello@agenttrafficcop.com">contact ↗</a>
-      </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════
-       FOOTER
-       ═══════════════════════════════════════════════ -->
+  <!-- FOOTER -->
   <footer>
-    <div class="wrap" style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; width: 100%;">
-      <div>agenttrafficcop · v0.1.0 · mmxxvi</div>
-      <div style="display: flex; gap: 20px;">
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">github</a>
-        <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">pypi</a>
-        <span>mit</span>
+    <div class="wrap">
+      <div>AgentTrafficCop · v0.1.0 · 2026</div>
+      <div class="meta">
+        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI</a>
+        <a href="mailto:hello@agenttrafficcop.com">Contact</a>
+        <span>MIT License</span>
       </div>
     </div>
   </footer>
 
-  <!-- ═══════════════════════════════════════════════
-       SCRIPT
-       ═══════════════════════════════════════════════ -->
   <script>
     function copyInstall(button) {
       const text = "pip install agenttrafficcop";
       const label = button.querySelector(".copy");
       const original = label.textContent;
       const done = () => {
-        label.textContent = "[copied ✓]";
-        label.style.color = "var(--green)";
-        setTimeout(() => {
-          label.textContent = original;
-          label.style.color = "";
-        }, 1500);
+        label.textContent = "copied ✓";
+        setTimeout(() => { label.textContent = original; }, 1500);
       };
       if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(text).then(done).catch(fallback);
@@ -723,15 +683,11 @@
         document.body.removeChild(ta);
       }
     }
-
     const io = new IntersectionObserver((entries) => {
       entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add("in");
-          io.unobserve(e.target);
-        }
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
       });
-    }, { threshold: 0.1, rootMargin: "0px 0px -40px 0px" });
+    }, { threshold: 0.12, rootMargin: "0px 0px -60px 0px" });
     document.querySelectorAll(".reveal").forEach(el => io.observe(el));
   </script>
 
