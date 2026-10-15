@@ -3,55 +3,51 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentTrafficCop — Stop the loop. Save the budget.</title>
-  <meta name="description" content="Runtime circuit breaker and schema shield for multi-agent systems. Catch loops before they burn tokens." />
-  <meta name="theme-color" content="#0e0e0c" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230e0e0c'/%3E%3Crect x='28' y='28' width='44' height='44' fill='%23e8e4d8'/%3E%3C/svg%3E" />
+  <title>AgentTrafficCop — Vintage-grade runtime guardrails for AI agents</title>
+  <meta name="description" content="A runtime circuit breaker for multi-agent systems. Stop loops before they burn budget." />
+  <meta name="theme-color" content="#1a1612" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%231a1612'/%3E%3Ctext x='50' y='72' font-size='62' text-anchor='middle' fill='%23e8dfc9' font-family='Georgia' font-weight='700'%3EA%3C/text%3E%3C/svg%3E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700;9..144,800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 
   <style>
     :root {
-      --bg: #0e0e0c;
-      --bg-1: #141412;
-      --bg-2: #1a1a17;
-      --bg-3: #222220;
-      --fg: #e8e4d8;
-      --fg-dim: #a8a59a;
-      --fg-mute: #6b6960;
-      --fg-faint: #3d3c37;
-      --line: #262520;
-      --line-soft: #1e1d1a;
-      --accent: #d4a259;
-      --accent-soft: #e6c084;
-      --accent-deep: #a67a3d;
+      --bg: #1a1612;
+      --bg-warm: #221d18;
+      --bg-card: #262019;
+      --bg-deep: #100d0a;
+      --ink: #e8dfc9;
+      --ink-dim: #b8ac93;
+      --ink-mute: #7a705f;
+      --ink-faint: #4a4340;
+      --line: #2e2822;
+      --line-strong: #3a322a;
+      --gold: #d4a259;
+      --gold-soft: #e6c084;
+      --rust: #c4643a;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
       background: var(--bg);
-      color: var(--fg);
-      font-family: 'Fraunces', Georgia, serif;
-      font-variation-settings: 'opsz' 14, 'SOFT' 50, 'WONK' 0;
-      font-size: 17px;
-      line-height: 1.6;
+      color: var(--ink);
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: 18px;
+      line-height: 1.55;
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
-      font-feature-settings: 'ss01';
+      position: relative;
     }
-    ::selection { background: var(--accent); color: var(--bg); }
 
-    /* ═══════════════════════════════════════════════════
-       FILM GRAIN — the star of the show.
-       Three layered grain textures for real depth:
-       1. Global film grain (fixed, animated)
-       2. Local paper texture on section backgrounds
-       3. Subtle chromatic noise on cards
-       ═══════════════════════════════════════════════════ */
+    ::selection { background: var(--gold); color: var(--bg); }
 
-    /* Layer 1: animated global film grain */
+    /* ══════════════════════════════════════════════════════
+       TEXTURE STACK — three layers
+       ══════════════════════════════════════════════════════ */
+
+    /* Layer 1: animated film grain */
     body::before {
       content: '';
       position: fixed;
@@ -60,595 +56,737 @@
       height: 200%;
       pointer-events: none;
       z-index: 9999;
-      opacity: 0.18;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      animation: grain 8s steps(10) infinite;
+      opacity: 0.22;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      animation: grain 6s steps(8) infinite;
       mix-blend-mode: overlay;
     }
-    @keyframes grain {
-      0%, 100% { transform: translate(0, 0); }
-      10% { transform: translate(-2%, -2%); }
-      20% { transform: translate(-4%, 2%); }
-      30% { transform: translate(2%, -4%); }
-      40% { transform: translate(-2%, 6%); }
-      50% { transform: translate(-4%, 4%); }
-      60% { transform: translate(6%, 0); }
-      70% { transform: translate(0, 6%); }
-      80% { transform: translate(4%, -4%); }
-      90% { transform: translate(-2%, 4%); }
-    }
 
-    /* Layer 2: static vignette for depth */
+    /* Layer 2: paper stain — subtle blotches on the background */
     body::after {
       content: '';
       position: fixed;
       inset: 0;
       pointer-events: none;
       z-index: 9998;
-      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.5) 100%);
+      opacity: 0.9;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(212, 162, 89, 0.06) 0%, transparent 40%),
+        radial-gradient(circle at 85% 70%, rgba(196, 100, 58, 0.05) 0%, transparent 45%),
+        radial-gradient(circle at 50% 100%, rgba(212, 162, 89, 0.04) 0%, transparent 50%);
     }
 
-    /* Layer 3: soft paper texture — applied via class */
-    .paper {
-      position: relative;
-    }
-    .paper::before {
-      content: '';
-      position: absolute;
+    /* Layer 3: vignette */
+    .vignette {
+      position: fixed;
       inset: 0;
       pointer-events: none;
-      opacity: 0.4;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
-      mix-blend-mode: soft-light;
+      z-index: 9997;
+      background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.45) 100%);
+    }
+
+    @keyframes grain {
+      0%, 100% { transform: translate(0, 0); }
+      20% { transform: translate(-3%, 2%); }
+      40% { transform: translate(2%, -3%); }
+      60% { transform: translate(-2%, -2%); }
+      80% { transform: translate(3%, 3%); }
     }
 
     ::-webkit-scrollbar { width: 10px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 5px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+    ::-webkit-scrollbar-track { background: var(--bg-deep); }
+    ::-webkit-scrollbar-thumb { background: var(--line-strong); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
 
-    .mono { font-family: 'JetBrains Mono', monospace; font-variation-settings: normal; }
-    .display {
-      font-family: 'Fraunces', Georgia, serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      letter-spacing: -0.045em;
-      line-height: 0.9;
+    /* ── Typography system ── */
+    .font-anton { font-family: 'Anton', 'Impact', sans-serif; font-weight: 400; letter-spacing: 0.005em; text-transform: uppercase; }
+    .font-display { font-family: 'DM Serif Display', Georgia, serif; font-weight: 400; letter-spacing: -0.03em; }
+    .font-serif { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; }
+    .font-serif-italic { font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-weight: 400; }
+    .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'ss01'; }
+    .uppercase { text-transform: uppercase; }
+    .small-caps { font-variant: small-caps; letter-spacing: 0.05em; }
+
+    .title-huge {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(4rem, 16vw, 15rem);
+      line-height: 0.82;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      text-transform: uppercase;
     }
-    .italic-display {
-      font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
-      font-weight: 300;
-      font-style: italic;
+
+    .title-section {
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      color: var(--ink);
     }
+    .title-section em { font-style: italic; color: var(--gold); }
 
     a { color: inherit; text-decoration: none; }
-    .link { border-bottom: 1px solid var(--fg-faint); transition: border-color 0.2s, color 0.2s; }
-    .link:hover { border-bottom-color: var(--accent); color: var(--accent-soft); }
 
-    .wrap { max-width: 1320px; margin: 0 auto; padding: 0 40px; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 0 40px; }
     .pad { padding: 140px 0; }
     .rule { border-top: 1px solid var(--line); }
 
     /* ── Reveal ── */
-    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 1s cubic-bezier(0.16,1,0.3,1), transform 1s cubic-bezier(0.16,1,0.3,1); }
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 1s cubic-bezier(0.16,1,0.3,1), transform 1s cubic-bezier(0.16,1,0.3,1); }
     .reveal.in { opacity: 1; transform: none; }
     .d1 { transition-delay: 0.1s; }
     .d2 { transition-delay: 0.2s; }
     .d3 { transition-delay: 0.3s; }
-    .d4 { transition-delay: 0.4s; }
 
-    /* ── Section chrome ── */
-    .meta-row {
-      display: flex;
-      align-items: baseline;
-      gap: 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--fg-mute);
-      margin-bottom: 60px;
-    }
-    .meta-row .num { color: var(--accent); font-weight: 500; }
-    .meta-row .line { flex: 1; height: 1px; background: var(--line); margin-top: 6px; }
-
-    /* ── Header ── */
+    /* ══════════════════════════════════════════════════════
+       HEADER — editorial, newspaper-style masthead
+       ══════════════════════════════════════════════════════ */
     header {
-      position: fixed; top: 0; left: 0; right: 0;
+      position: fixed;
+      top: 0; left: 0; right: 0;
       z-index: 100;
-      height: 64px;
-      background: rgba(14,14,12,0.72);
+      background: rgba(26, 22, 18, 0.82);
       backdrop-filter: saturate(140%) blur(20px);
       -webkit-backdrop-filter: saturate(140%) blur(20px);
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line);
     }
-    header .wrap { height: 100%; display: flex; align-items: center; justify-content: space-between; }
-    .logo { display: flex; align-items: center; gap: 10px; font-family: 'Fraunces', serif; font-weight: 500; font-size: 16px; letter-spacing: -0.02em; }
-    .logo-mark { width: 22px; height: 22px; background: var(--fg); position: relative; }
-    .logo-mark::after { content: ''; position: absolute; inset: 5px 5px auto auto; width: 8px; height: 8px; background: var(--accent); }
-    nav.main { display: flex; gap: 36px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-mute); }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      padding: 0 40px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .masthead {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .masthead-mark {
+      width: 26px;
+      height: 26px;
+      background: var(--ink);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--bg);
+      font-family: 'Anton', sans-serif;
+      font-size: 15px;
+    }
+    .masthead-title {
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-size: 19px;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+    }
+    .masthead-meta {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      margin-left: 8px;
+      padding-left: 14px;
+      border-left: 1px solid var(--line-strong);
+    }
+    nav.main {
+      display: flex;
+      gap: 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+    }
     nav.main a { transition: color 0.2s; }
-    nav.main a:hover { color: var(--fg); }
+    nav.main a:hover { color: var(--gold); }
     .header-cta {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.18em;
+      font-size: 10px;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      padding: 10px 18px;
-      background: var(--fg);
-      color: var(--bg);
+      padding: 10px 20px;
+      border: 1px solid var(--line-strong);
+      color: var(--ink);
       transition: all 0.2s;
     }
-    .header-cta:hover { background: var(--accent); color: var(--bg); }
-    @media (max-width: 860px) { nav.main { display: none; } }
+    .header-cta:hover { border-color: var(--gold); color: var(--gold); }
+    @media (max-width: 900px) {
+      nav.main { display: none; }
+      .header-inner { padding: 0 24px; }
+      .masthead-meta { display: none; }
+    }
 
-    /* ── HERO ── */
-    .hero { padding: 200px 0 100px; position: relative; }
-
-    .hero-eyebrow {
-      display: flex; align-items: center; gap: 14px;
+    /* ══════════════════════════════════════════════════════
+       HERO — poster-style with sidebars
+       ══════════════════════════════════════════════════════ */
+    .hero {
+      padding: 140px 0 80px;
+      position: relative;
+    }
+    .hero-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 60px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.2em;
+      font-size: 10px;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      color: var(--fg-mute);
-      margin-bottom: 40px;
+      color: var(--ink-mute);
+      flex-wrap: wrap;
+      gap: 20px;
     }
-    .hero-eyebrow .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--accent);
-      animation: pulse 2s ease-in-out infinite;
-    }
+    .hero-topbar .dot { width: 5px; height: 5px; background: var(--gold); border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: middle; animation: pulse 2s infinite; }
     @keyframes pulse {
-      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(212,162,89,0.5); }
-      50% { opacity: 0.5; box-shadow: 0 0 0 8px rgba(212,162,89,0); }
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
     }
 
-    .hero-title {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      font-size: clamp(3.5rem, 13vw, 13rem);
-      line-height: 0.86;
-      letter-spacing: -0.055em;
-      color: var(--fg);
+    .hero-body {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 60px;
+      align-items: start;
+    }
+    .hero-main { }
+    .hero-title-wrap {
+      position: relative;
       margin-bottom: 60px;
     }
-    .hero-title em {
-      font-style: italic;
-      font-weight: 300;
-      font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
-      color: var(--accent);
+    .hero-title {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(4rem, 14vw, 13rem);
+      line-height: 0.82;
+      letter-spacing: -0.015em;
+      text-transform: uppercase;
+      color: var(--ink);
     }
+    .hero-title .outline {
+      -webkit-text-stroke: 2px var(--ink);
+      color: transparent;
+    }
+    .hero-title .gold { color: var(--gold); }
 
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 80px;
-      align-items: end;
-      padding-top: 60px;
-      border-top: 1px solid var(--line);
-    }
     .hero-sub {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 20, 'SOFT' 50;
-      font-size: clamp(1.05rem, 1.5vw, 1.35rem);
-      line-height: 1.5;
-      color: var(--fg-dim);
-      max-width: 520px;
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: clamp(1.15rem, 1.8vw, 1.5rem);
+      line-height: 1.45;
+      color: var(--ink-dim);
+      max-width: 640px;
+      margin-bottom: 50px;
     }
-    .hero-sub strong { color: var(--fg); font-weight: 600; }
+    .hero-sub em { font-style: italic; color: var(--gold); }
 
-    .hero-actions { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
-
-    .install {
-      display: inline-flex; align-items: center; gap: 14px;
-      padding: 18px 24px;
-      background: var(--bg-1);
-      border: 1px solid var(--line);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.25s;
-      color: var(--fg);
+    .hero-cta-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
     }
-    .install:hover { border-color: var(--accent); background: var(--bg-2); }
-    .install .prompt { color: var(--accent); }
-    .install .copy { color: var(--fg-mute); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; margin-left: 8px; }
-    .install:hover .copy { color: var(--accent-soft); }
 
     .btn {
-      display: inline-flex; align-items: center; gap: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
       padding: 16px 26px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.18em;
+      font-size: 10px;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
       background: transparent;
-      border: 1px solid var(--line);
-      color: var(--fg);
+      border: 1px solid var(--line-strong);
+      color: var(--ink);
       cursor: pointer;
       transition: all 0.2s;
     }
-    .btn:hover { border-color: var(--accent); color: var(--accent-soft); }
-    .btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-    .btn-primary:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+    .btn:hover { border-color: var(--gold); color: var(--gold); }
+    .btn-solid { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .btn-solid:hover { background: var(--gold); border-color: var(--gold); color: var(--bg); }
 
-    @media (max-width: 900px) {
-      .hero { padding: 140px 0 80px; }
-      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    /* Sidebar in hero */
+    .hero-side {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      padding-top: 20px;
+    }
+    .side-block { }
+    .side-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      margin-bottom: 12px;
+      display: block;
+    }
+    .side-value {
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: var(--ink-dim);
+    }
+    .side-value strong { color: var(--ink); font-weight: 500; }
+
+    .install {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 20px;
+      background: var(--bg-warm);
+      border: 1px solid var(--line-strong);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: var(--ink);
+      width: 100%;
+      text-align: left;
+    }
+    .install:hover { border-color: var(--gold); }
+    .install .prompt { color: var(--gold); }
+    .install .copy { color: var(--ink-mute); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; margin-left: auto; }
+
+    @media (max-width: 1000px) {
+      .hero-body { grid-template-columns: 1fr; gap: 60px; }
+      .hero-side { padding-top: 0; }
+    }
+    @media (max-width: 640px) {
       .wrap { padding: 0 24px; }
+      .hero { padding: 100px 0 60px; }
       .pad { padding: 90px 0; }
     }
 
-    /* ── SECTION TITLES ── */
-    .section-title {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      font-size: clamp(2.5rem, 6vw, 5.5rem);
-      line-height: 0.92;
-      letter-spacing: -0.05em;
-      color: var(--fg);
-      margin-bottom: 80px;
+    /* ══════════════════════════════════════════════════════
+       SECTION HEADERS — editorial
+       ══════════════════════════════════════════════════════ */
+    .section-head {
+      display: grid;
+      grid-template-columns: 60px 1fr auto;
+      gap: 20px;
+      align-items: baseline;
+      padding: 24px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 60px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
     }
-    .section-title em {
-      font-style: italic;
-      font-weight: 300;
-      font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
-      color: var(--accent);
-    }
+    .section-head .num { color: var(--gold); font-size: 12px; }
+    .section-head .title { color: var(--ink); }
 
-    /* ── TERMINAL ── */
+    /* ══════════════════════════════════════════════════════
+       TERMINAL
+       ══════════════════════════════════════════════════════ */
     .terminal {
-      background: #080807;
-      border: 1px solid var(--line);
+      background: var(--bg-deep);
+      border: 1px solid var(--line-strong);
       overflow: hidden;
       position: relative;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,0.03) inset,
-        0 40px 100px -40px rgba(0,0,0,0.6),
-        0 0 80px -30px rgba(212,162,89,0.08);
     }
     .terminal::before {
       content: '';
       position: absolute;
       inset: 0;
       pointer-events: none;
-      opacity: 0.5;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='t'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23t)'/%3E%3C/svg%3E");
-      mix-blend-mode: soft-light;
+      opacity: 0.6;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='t'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23t)'/%3E%3C/svg%3E");
+      mix-blend-mode: overlay;
     }
     .terminal-bar {
       padding: 12px 20px;
-      background: #050504;
       border-bottom: 1px solid var(--line);
-      display: flex; align-items: center; gap: 8px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.05em;
-      color: var(--fg-faint);
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    .terminal-bar .dot { width: 10px; height: 10px; border-radius: 50%; }
     .terminal-body {
-      padding: 32px;
+      padding: 40px;
       font-family: 'JetBrains Mono', monospace;
       font-size: 13px;
       line-height: 1.9;
+      color: var(--ink-dim);
       overflow-x: auto;
       white-space: pre;
-      color: var(--fg-dim);
       position: relative;
     }
-    .terminal-body .ok { color: #7fb87f; }
-    .terminal-body .fail { color: #d97757; }
-    .terminal-body .warn { color: var(--accent); }
-    .terminal-body .info { color: #8db8d4; }
-    .terminal-body .dim { color: var(--fg-faint); }
+    .terminal-body .ok { color: #8fb87a; }
+    .terminal-body .fail { color: var(--rust); }
+    .terminal-body .warn { color: var(--gold); }
+    .terminal-body .info { color: #8daeb8; }
+    .terminal-body .dim { color: var(--ink-faint); }
+    @media (max-width: 640px) { .terminal-body { padding: 24px; font-size: 11px; } }
 
-    /* ── FEATURES ── */
+    /* ══════════════════════════════════════════════════════
+       FEATURES — as editorial columns
+       ══════════════════════════════════════════════════════ */
     .features {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: var(--line);
+      gap: 0;
       border-top: 1px solid var(--line);
       border-bottom: 1px solid var(--line);
     }
     .feature {
-      background: var(--bg);
-      padding: 56px 44px;
+      padding: 60px 40px;
+      border-right: 1px solid var(--line);
       position: relative;
-      min-height: 360px;
-      transition: background 0.3s;
-      display: flex;
-      flex-direction: column;
     }
-    .feature:hover { background: var(--bg-1); }
-    .feature .num {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.18em;
-      color: var(--accent);
-      margin-bottom: 40px;
+    .feature:last-child { border-right: none; }
+    .feature-num {
+      font-family: 'Anton', sans-serif;
+      font-size: 90px;
+      line-height: 0.8;
+      color: transparent;
+      -webkit-text-stroke: 1px var(--ink-faint);
+      margin-bottom: 32px;
+      letter-spacing: -0.02em;
     }
     .feature h3 {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 60, 'SOFT' 20, 'WONK' 1;
-      font-weight: 500;
-      font-size: 30px;
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-size: 32px;
+      letter-spacing: -0.02em;
       line-height: 1.05;
-      letter-spacing: -0.03em;
+      color: var(--ink);
       margin-bottom: 20px;
-      color: var(--fg);
     }
-    .feature p { font-size: 16px; line-height: 1.55; color: var(--fg-dim); font-family: 'Fraunces', serif; font-variation-settings: 'opsz' 16, 'SOFT' 40; }
-    @media (max-width: 900px) { .features { grid-template-columns: 1fr; } }
+    .feature h3 em { color: var(--gold); font-style: italic; }
+    .feature p {
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: 17px;
+      line-height: 1.55;
+      color: var(--ink-dim);
+    }
+    @media (max-width: 900px) {
+      .features { grid-template-columns: 1fr; }
+      .feature { border-right: none; border-bottom: 1px solid var(--line); }
+      .feature:last-child { border-bottom: none; }
+      .feature-num { font-size: 70px; }
+    }
 
-    /* ── STATS ── */
+    /* ══════════════════════════════════════════════════════
+       STATS — vintage almanac style
+       ══════════════════════════════════════════════════════ */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 1px;
-      background: var(--line);
+      gap: 0;
       border: 1px solid var(--line);
     }
-    .stat { background: var(--bg); padding: 48px 36px; position: relative; }
-    .stat .big {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      font-size: clamp(2.5rem, 5vw, 4.5rem);
-      line-height: 0.95;
-      letter-spacing: -0.04em;
-      color: var(--fg);
+    .stat {
+      padding: 48px 32px;
+      border-right: 1px solid var(--line);
+      position: relative;
+    }
+    .stat:last-child { border-right: none; }
+    .stat-num {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(3rem, 5vw, 4.5rem);
+      line-height: 0.9;
+      letter-spacing: -0.02em;
+      color: var(--gold);
       margin-bottom: 20px;
     }
-    .stat .big em { font-style: italic; font-weight: 300; color: var(--accent); }
-    .stat .label {
+    .stat-label {
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
-      letter-spacing: 0.2em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      color: var(--fg-mute);
-      margin-bottom: 10px;
+      color: var(--ink-mute);
+      margin-bottom: 12px;
     }
-    .stat .desc { font-size: 14px; color: var(--fg-dim); line-height: 1.5; font-family: 'Fraunces', serif; }
-    @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+    .stat-desc {
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: 15px;
+      color: var(--ink-dim);
+      line-height: 1.5;
+    }
+    @media (max-width: 900px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .stat:nth-child(2) { border-right: none; }
+      .stat:nth-child(1),
+      .stat:nth-child(2) { border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 500px) { .stats { grid-template-columns: 1fr; } .stat { border-right: none; border-bottom: 1px solid var(--line); } .stat:last-child { border-bottom: none; } }
 
-    /* ── PRICING ── */
+    /* ══════════════════════════════════════════════════════
+       PRICING — vintage classified ads
+       ══════════════════════════════════════════════════════ */
     .pricing {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 1px;
-      background: var(--line);
+      gap: 0;
       border: 1px solid var(--line);
-      margin-top: 40px;
     }
     .plan {
-      background: var(--bg);
       padding: 44px 32px;
+      border-right: 1px solid var(--line);
+      background: transparent;
       display: flex;
       flex-direction: column;
       position: relative;
       transition: background 0.3s;
     }
-    .plan:hover { background: var(--bg-1); }
-    .plan.featured { background: var(--bg-2); }
+    .plan:last-child { border-right: none; }
+    .plan:hover { background: var(--bg-warm); }
+    .plan.featured { background: var(--bg-warm); }
     .plan.featured::before {
       content: '';
       position: absolute;
       inset: 0;
-      pointer-events: none;
-      border: 1px solid var(--accent);
-      opacity: 0.6;
+      border: 1px solid var(--gold);
       margin: -1px;
-    }
-    .plan-name {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--fg-mute);
-      margin-bottom: 28px;
+      pointer-events: none;
     }
     .plan-badge {
       position: absolute;
-      top: 0; right: 0;
-      padding: 6px 12px;
+      top: 16px;
+      right: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--gold);
+      border: 1px solid var(--gold);
+      padding: 4px 8px;
+    }
+    .plan-name {
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
-      letter-spacing: 0.18em;
+      letter-spacing: 0.25em;
       text-transform: uppercase;
-      background: var(--accent);
-      color: var(--bg);
+      color: var(--ink-mute);
+      margin-bottom: 28px;
     }
     .plan-price {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      font-size: 46px;
-      line-height: 0.95;
-      letter-spacing: -0.04em;
-      color: var(--fg);
+      font-family: 'Anton', sans-serif;
+      font-size: 54px;
+      line-height: 0.9;
+      letter-spacing: -0.02em;
+      color: var(--ink);
       margin-bottom: 6px;
     }
-    .plan-price span { font-size: 15px; font-weight: 400; color: var(--fg-mute); font-style: italic; }
+    .plan-price span {
+      font-family: 'Instrument Serif', serif;
+      font-size: 16px;
+      color: var(--ink-mute);
+      font-style: italic;
+    }
     .plan-period {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--fg-mute);
-      margin-bottom: 36px;
+      font-family: 'Instrument Serif', serif;
+      font-size: 14px;
+      font-style: italic;
+      color: var(--ink-mute);
+      margin-bottom: 32px;
     }
-    .plan ul { list-style: none; margin: 0 0 36px; padding: 0; flex: 1; }
+    .plan ul { list-style: none; margin-bottom: 36px; flex: 1; }
     .plan li {
+      font-family: 'Instrument Serif', Georgia, serif;
       font-size: 15px;
-      color: var(--fg-dim);
+      color: var(--ink-dim);
       padding: 10px 0;
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px dotted var(--line-strong);
       display: flex;
-      gap: 12px;
-      align-items: baseline;
-      font-family: 'Fraunces', serif;
+      gap: 10px;
     }
-    .plan li::before { content: '—'; color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 12px; flex-shrink: 0; }
+    .plan li::before { content: '·'; color: var(--gold); font-family: 'JetBrains Mono', monospace; }
     .plan li:last-child { border-bottom: none; }
-    .plan .btn { width: 100%; justify-content: center; padding: 15px; }
-    .plan.featured .btn { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-    .plan.featured .btn:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
-    @media (max-width: 900px) { .pricing { grid-template-columns: repeat(2, 1fr); } }
-    @media (max-width: 600px) { .pricing { grid-template-columns: 1fr; } }
+    .plan .btn { width: 100%; justify-content: center; }
+    @media (max-width: 900px) {
+      .pricing { grid-template-columns: repeat(2, 1fr); }
+      .plan:nth-child(2) { border-right: none; }
+      .plan:nth-child(1),
+      .plan:nth-child(2) { border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 500px) { .pricing { grid-template-columns: 1fr; } .plan { border-right: none; border-bottom: 1px solid var(--line); } }
 
-    /* ── CTA ── */
+    /* ══════════════════════════════════════════════════════
+       CTA — poster-style bottom
+       ══════════════════════════════════════════════════════ */
     .cta {
       padding: 160px 0;
       border-top: 1px solid var(--line);
       position: relative;
-      overflow: hidden;
     }
-    .cta::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      background: radial-gradient(ellipse 50% 60% at 50% 100%, rgba(212,162,89,0.12), transparent 70%);
+    .cta-title {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(4rem, 13vw, 13rem);
+      line-height: 0.82;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 60px;
     }
-    .cta h2 {
-      font-family: 'Fraunces', serif;
-      font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
-      font-weight: 500;
-      font-size: clamp(3rem, 10vw, 10rem);
-      line-height: 0.86;
-      letter-spacing: -0.055em;
-      margin-bottom: 40px;
+    .cta-title .gold { color: var(--gold); }
+    .cta-body {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 60px;
+      align-items: end;
+      padding-top: 40px;
+      border-top: 1px solid var(--line);
     }
-    .cta h2 em {
+    .cta-body p {
+      font-family: 'Instrument Serif', Georgia, serif;
+      font-size: 22px;
       font-style: italic;
-      font-weight: 300;
-      font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
-      color: var(--accent);
-    }
-    .cta p {
-      font-family: 'Fraunces', serif;
-      font-size: 18px;
-      color: var(--fg-dim);
+      color: var(--ink-dim);
       max-width: 500px;
-      margin-bottom: 56px;
-      font-style: italic;
     }
-    .cta .install { padding: 22px 30px; font-size: 15px; }
-    .cta-links { display: flex; gap: 32px; margin-top: 60px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
-    .cta-links a { color: var(--fg-mute); transition: color 0.2s; border-bottom: 1px solid transparent; padding-bottom: 4px; }
-    .cta-links a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+    @media (max-width: 800px) { .cta-body { grid-template-columns: 1fr; } }
 
-    /* ── FOOTER ── */
+    /* ══════════════════════════════════════════════════════
+       FOOTER
+       ══════════════════════════════════════════════════════ */
     footer {
-      padding: 44px 0;
+      padding: 40px 0;
       border-top: 1px solid var(--line);
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.15em;
+      font-size: 10px;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      color: var(--fg-mute);
+      color: var(--ink-mute);
     }
     footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
     footer .meta { display: flex; gap: 28px; }
     footer a { transition: color 0.2s; }
-    footer a:hover { color: var(--accent); }
+    footer a:hover { color: var(--gold); }
 
     /* ── Reduced motion ── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
-      body::before { animation: none; opacity: 0.12; }
+      body::before { animation: none; }
       .reveal { opacity: 1; transform: none; }
     }
   </style>
 </head>
 <body>
 
-<!-- HEADER -->
+<div class="vignette"></div>
+
+<!-- ══════════════════════════════════════════════════════
+     HEADER
+     ══════════════════════════════════════════════════════ -->
 <header>
-  <div class="wrap">
-    <a href="#" class="logo">
-      <span class="logo-mark"></span>
-      <span>AgentTrafficCop</span>
+  <div class="header-inner">
+    <a href="#" class="masthead">
+      <span class="masthead-mark">A</span>
+      <span class="masthead-title">AgentTrafficCop</span>
+      <span class="masthead-meta">Est. MMXXVI</span>
     </a>
     <nav class="main">
-      <a href="#features">Features</a>
       <a href="#demo">Demo</a>
+      <a href="#features">Features</a>
       <a href="#how">Integrate</a>
       <a href="#pricing">Pricing</a>
-      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">Source</a>
     </nav>
-    <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="header-cta">View on GitHub ↗</a>
+    <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="header-cta">GitHub ↗</a>
   </div>
 </header>
 
-<!-- HERO -->
+<!-- ══════════════════════════════════════════════════════
+     HERO
+     ══════════════════════════════════════════════════════ -->
 <section class="hero">
   <div class="wrap">
-    <div class="hero-eyebrow reveal">
-      <span class="dot"></span>
-      <span>v0.1.0 — live on PyPI</span>
+    <div class="hero-topbar reveal">
+      <span><span class="dot"></span>Available on PyPI — Version 0.1.0</span>
+      <span>Vol. I — No. 1</span>
+      <span>Est. October 2026</span>
     </div>
 
-    <h1 class="hero-title reveal d1">
-      Stop the loop.<br/>
-      Save the <em>budget.</em>
-    </h1>
+    <div class="hero-body">
+      <div class="hero-main">
+        <div class="hero-title-wrap reveal d1">
+          <h1 class="hero-title">
+            Stop the<br/>
+            <span class="gold">loop.</span><br/>
+            Save the<br/>
+            <span class="outline">budget.</span>
+          </h1>
+        </div>
 
-    <div class="hero-grid">
-      <div class="reveal d2">
-        <p class="hero-sub">
-          A <strong>runtime circuit breaker</strong> for multi-agent systems.
-          Sits between your agents, fingerprints every payload with SHA-256,
-          and trips before <strong>$400</strong> becomes <strong>$4,000</strong>.
+        <p class="hero-sub reveal d2">
+          A <em>runtime circuit breaker</em> for multi-agent systems. Sits between your agents, fingerprints every payload with SHA-256, and trips before <strong style="color:var(--ink);">$400</strong> becomes <strong style="color:var(--ink);">$4,000</strong>.
         </p>
-      </div>
-      <div class="hero-actions reveal d3">
-        <button type="button" class="install" onclick="copyInstall(this)">
-          <span class="prompt">$</span>
-          <span>pip install agenttrafficcop</span>
-          <span class="copy">copy</span>
-        </button>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-          <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn btn-primary">View source</a>
-          <a href="#demo" class="btn">See the demo</a>
+
+        <div class="hero-cta-row reveal d3">
+          <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn btn-solid">View source ↗</a>
+          <a href="#demo" class="btn">Read the demo</a>
         </div>
       </div>
+
+      <aside class="hero-side reveal d2">
+        <div class="side-block">
+          <span class="side-label">Installation</span>
+          <button type="button" class="install" onclick="copyInstall(this)">
+            <span class="prompt">$</span>
+            <span>pip install agenttrafficcop</span>
+            <span class="copy">copy</span>
+          </button>
+        </div>
+
+        <div class="side-block">
+          <span class="side-label">Integrates with</span>
+          <span class="side-value">LangGraph · CrewAI · AutoGen · raw asyncio</span>
+        </div>
+
+        <div class="side-block">
+          <span class="side-label">Performance</span>
+          <span class="side-value"><strong>&lt;1ms</strong> overhead per handoff</span>
+        </div>
+
+        <div class="side-block">
+          <span class="side-label">License</span>
+          <span class="side-value">MIT · <strong>open source</strong></span>
+        </div>
+      </aside>
     </div>
   </div>
 </section>
 
-<!-- DEMO -->
+<!-- ══════════════════════════════════════════════════════
+     DEMO
+     ══════════════════════════════════════════════════════ -->
 <section id="demo" class="pad rule">
   <div class="wrap">
-    <div class="meta-row reveal">
+    <div class="section-head reveal">
       <span class="num">01</span>
-      <span>Live output</span>
-      <span class="line"></span>
+      <span class="title">The Live Demonstration</span>
       <span>python demo.py</span>
     </div>
 
-    <h2 class="section-title reveal d1">
+    <h2 class="title-section reveal d1" style="margin-bottom: 60px;">
       Two agents. One loop.<br/>
       The breaker <em>trips.</em>
     </h2>
 
     <div class="terminal reveal d2">
       <div class="terminal-bar">
-        <span class="dot" style="background:#3d2b1a"></span>
-        <span class="dot" style="background:#3d3a1a"></span>
-        <span class="dot" style="background:#1e3d1e"></span>
-        <span style="margin-left: 12px;">python demo.py</span>
+        <span>⊙ ⊙ ⊙  ·  bash — agenttrafficcop</span>
+        <span>80 × 24</span>
       </div>
       <div class="terminal-body"><span class="dim">$ python demo.py</span>
 
-<span class="dim">────────────────────────────────────────────────────</span>
+<span class="dim">─────────────────────────────────────────────────</span>
 <span class="dim">RUN 1 · WITHOUT AgentTrafficCop</span>
-<span class="dim">────────────────────────────────────────────────────</span>
+<span class="dim">─────────────────────────────────────────────────</span>
 
   <span class="info">coder</span>     → reviewer : {'diff': 'rename foo to bar'}
   <span class="info">reviewer</span>  → coder    : {'feedback': 'add a docstring'}
@@ -658,9 +796,9 @@
 
   <span class="fail">✗ no breaker · 24 messages · cost: $0.10</span>
 
-<span class="dim">────────────────────────────────────────────────────</span>
+<span class="dim">─────────────────────────────────────────────────</span>
 <span class="dim">RUN 2 · WITH AgentTrafficCop</span>
-<span class="dim">────────────────────────────────────────────────────</span>
+<span class="dim">─────────────────────────────────────────────────</span>
 
   <span class="info">coder</span>     → reviewer : {...}  <span class="ok">✓ step=1</span>
   <span class="info">reviewer</span>  → coder    : {...}  <span class="ok">✓ step=2</span>
@@ -681,62 +819,64 @@
   </div>
 </section>
 
-<!-- FEATURES -->
+<!-- ══════════════════════════════════════════════════════
+     FEATURES
+     ══════════════════════════════════════════════════════ -->
 <section id="features" class="pad rule">
   <div class="wrap">
-    <div class="meta-row reveal">
+    <div class="section-head reveal">
       <span class="num">02</span>
-      <span>The solution</span>
-      <span class="line"></span>
+      <span class="title">The Solution</span>
       <span>three primitives</span>
     </div>
 
-    <h2 class="section-title reveal d1">
+    <h2 class="title-section reveal d1" style="margin-bottom: 80px;">
       Three things, sitting<br/>
       between your <em>agents.</em>
     </h2>
   </div>
 
-  <div class="features reveal d2">
-    <div class="feature">
-      <div class="num">01</div>
-      <h3>Schema shield</h3>
-      <p>Every handoff validated against a strict Pydantic contract. Malformed payloads get a structured 422 before they reach the next agent.</p>
-    </div>
-    <div class="feature">
-      <div class="num">02</div>
-      <h3>Loop detection</h3>
-      <p>SHA-256 fingerprinting on every payload. Identical repeats and A↔B ping-pongs trip the breaker. Step counters catch the rest.</p>
-    </div>
-    <div class="feature">
-      <div class="num">03</div>
-      <h3>Runtime breaker</h3>
-      <p>Thresholds breach, the response carries structured diagnostics. Your orchestrator decides: halt, alert, or escalate.</p>
+  <div class="wrap" style="padding: 0;">
+    <div class="features reveal d2">
+      <div class="feature">
+        <div class="feature-num">01</div>
+        <h3>Schema <em>shield.</em></h3>
+        <p>Every handoff validated against a strict Pydantic contract. Malformed payloads get a structured 422 before they reach the next agent.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-num">02</div>
+        <h3>Loop <em>detection.</em></h3>
+        <p>SHA-256 fingerprinting on every payload. Identical repeats and A↔B ping-pongs trip the breaker. Step counters catch the rest.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-num">03</div>
+        <h3>Runtime <em>breaker.</em></h3>
+        <p>Thresholds breach, the response carries structured diagnostics. Your orchestrator decides: halt, alert, or escalate.</p>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- HOW -->
+<!-- ══════════════════════════════════════════════════════
+     HOW
+     ══════════════════════════════════════════════════════ -->
 <section id="how" class="pad rule">
   <div class="wrap">
-    <div class="meta-row reveal">
+    <div class="section-head reveal">
       <span class="num">03</span>
-      <span>Integration</span>
-      <span class="line"></span>
+      <span class="title">Integration</span>
       <span>five lines</span>
     </div>
 
-    <h2 class="section-title reveal d1">
+    <h2 class="title-section reveal d1" style="margin-bottom: 60px;">
       Five lines to add it<br/>
       to your <em>orchestrator.</em>
     </h2>
 
     <div class="terminal reveal d2">
       <div class="terminal-bar">
-        <span class="dot" style="background:#3d2b1a"></span>
-        <span class="dot" style="background:#3d3a1a"></span>
-        <span class="dot" style="background:#1e3d1e"></span>
-        <span style="margin-left: 12px;">your_orchestrator.py</span>
+        <span>⊙ ⊙ ⊙  ·  your_orchestrator.py</span>
+        <span>python</span>
       </div>
       <div class="terminal-body"><span class="info">from</span> agenttrafficcop <span class="info">import</span> Guard, LoopDetected
 
@@ -754,72 +894,72 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
     print(<span class="warn">"loop caught:"</span>, e.error_code)</div>
     </div>
 
-    <p class="reveal d3" style="margin-top: 40px; color: var(--fg-dim); font-size: 17px; max-width: 640px; font-family: 'Fraunces', serif; font-style: italic;">
+    <p class="reveal d3" style="margin-top: 40px; font-family: 'Instrument Serif', serif; font-style: italic; font-size: 18px; color: var(--ink-dim); max-width: 640px;">
       Works with LangGraph, CrewAI, AutoGen, or raw asyncio. Runs as a standalone service — call it before any handoff.
     </p>
   </div>
 </section>
 
-<!-- STATS -->
+<!-- ══════════════════════════════════════════════════════
+     STATS
+     ══════════════════════════════════════════════════════ -->
 <section class="pad rule">
   <div class="wrap">
-    <div class="meta-row reveal">
+    <div class="section-head reveal">
       <span class="num">04</span>
-      <span>Built for production</span>
-      <span class="line"></span>
+      <span class="title">Built for Production</span>
+      <span>almanac</span>
     </div>
 
-    <h2 class="section-title reveal d1">
+    <h2 class="title-section reveal d1" style="margin-bottom: 60px;">
       Tested, observable,<br/>
       <em>hardened.</em>
     </h2>
 
     <div class="stats reveal d2">
       <div class="stat">
-        <div class="big">168</div>
-        <div class="label">Tests</div>
-        <div class="desc">Passing in CI on every commit</div>
+        <div class="stat-num">168</div>
+        <div class="stat-label">Tests</div>
+        <div class="stat-desc">Passing in CI on every commit</div>
       </div>
       <div class="stat">
-        <div class="big">&lt;1<span style="font-size:1.5rem; color:var(--fg-mute); font-style:italic;">ms</span></div>
-        <div class="label">Overhead</div>
-        <div class="desc">Per handoff, canonical JSON payload</div>
+        <div class="stat-num">&lt;1<span style="font-size:1.5rem; color: var(--ink-mute); font-style: italic;">ms</span></div>
+        <div class="stat-label">Overhead</div>
+        <div class="stat-desc">Per handoff, canonical JSON payload</div>
       </div>
       <div class="stat">
-        <div class="big">Redis</div>
-        <div class="label">Or memory</div>
-        <div class="desc">Pluggable session store, one env var</div>
+        <div class="stat-num">Redis</div>
+        <div class="stat-label">Or memory</div>
+        <div class="stat-desc">Pluggable session store, one env var</div>
       </div>
       <div class="stat">
-        <div class="big">MIT</div>
-        <div class="label">License</div>
-        <div class="desc">Open source, on PyPI</div>
+        <div class="stat-num">MIT</div>
+        <div class="stat-label">License</div>
+        <div class="stat-desc">Open source, on PyPI</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- PRICING -->
+<!-- ══════════════════════════════════════════════════════
+     PRICING
+     ══════════════════════════════════════════════════════ -->
 <section id="pricing" class="pad rule">
   <div class="wrap">
-    <div class="meta-row reveal">
+    <div class="section-head reveal">
       <span class="num">05</span>
-      <span>Pricing</span>
-      <span class="line"></span>
+      <span class="title">Pricing</span>
       <span>planned tiers</span>
     </div>
 
-    <h2 class="section-title reveal d1">
+    <h2 class="title-section reveal d1" style="margin-bottom: 24px;">
       Free to start.<br/>
       Scale when you <em>need to.</em>
     </h2>
-
-    <p class="reveal d2" style="font-size: 17px; color: var(--fg-dim); margin-bottom: 0; max-width: 560px; font-style: italic; font-family: 'Fraunces', serif;">
+    <p class="reveal d2" style="font-family: 'Instrument Serif', serif; font-style: italic; font-size: 19px; color: var(--ink-dim); max-width: 560px; margin-bottom: 60px;">
       The middleware and SDK are open source. The managed service is coming soon — pricing below is the plan.
     </p>
-  </div>
 
-  <div class="wrap">
     <div class="pricing reveal d3">
       <div class="plan">
         <div class="plan-name">Free</div>
@@ -831,7 +971,7 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
           <li>Community support</li>
           <li>Self-hosted</li>
         </ul>
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn">Get started</a>
+        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="btn">Get started ↗</a>
       </div>
 
       <div class="plan featured">
@@ -846,7 +986,7 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
           <li>30-day audit log</li>
           <li>Email support</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Pro%20plan" class="btn">Join waitlist</a>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Pro%20plan" class="btn btn-solid">Join waitlist ↗</a>
       </div>
 
       <div class="plan">
@@ -859,7 +999,7 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
           <li>Priority support</li>
           <li>Slack Connect</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Team%20plan" class="btn">Contact us</a>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Team%20plan" class="btn">Contact ↗</a>
       </div>
 
       <div class="plan">
@@ -872,43 +1012,55 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
           <li>On-prem or VPC</li>
           <li>DPA, BAA, custom SLAs</li>
         </ul>
-        <a href="mailto:hello@agenttrafficcop.com?subject=Enterprise%20inquiry" class="btn">Contact us</a>
+        <a href="mailto:hello@agenttrafficcop.com?subject=Enterprise%20inquiry" class="btn">Contact ↗</a>
       </div>
     </div>
   </div>
 </section>
 
-<!-- CTA -->
+<!-- ══════════════════════════════════════════════════════
+     CTA
+     ══════════════════════════════════════════════════════ -->
 <section class="cta">
   <div class="wrap">
-    <h2 class="reveal">
-      Try it in<br/>
-      <em>sixty seconds.</em>
-    </h2>
-    <p class="reveal d1">One command. Three lines. Zero runtime dependencies.</p>
-    <div class="reveal d2">
-      <button type="button" class="install" onclick="copyInstall(this)">
-        <span class="prompt">$</span>
-        <span>pip install agenttrafficcop</span>
-        <span class="copy">copy</span>
-      </button>
+    <div class="section-head reveal" style="margin-bottom: 80px;">
+      <span class="num">06</span>
+      <span class="title">Begin</span>
+      <span>sixty seconds</span>
     </div>
-    <div class="cta-links reveal d3">
-      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub ↗</a>
-      <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI ↗</a>
-      <a href="mailto:hello@agenttrafficcop.com">Contact ↗</a>
+
+    <h2 class="cta-title reveal d1">
+      Try it in<br/>
+      <span class="gold">sixty seconds.</span>
+    </h2>
+
+    <div class="cta-body reveal d2">
+      <p>
+        One command to install.<br/>
+        Three lines to integrate.<br/>
+        Zero runtime dependencies.
+      </p>
+      <div>
+        <button type="button" class="install" onclick="copyInstall(this)" style="min-width: 340px;">
+          <span class="prompt">$</span>
+          <span>pip install agenttrafficcop</span>
+          <span class="copy">copy</span>
+        </button>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- FOOTER -->
+<!-- ══════════════════════════════════════════════════════
+     FOOTER
+     ══════════════════════════════════════════════════════ -->
 <footer>
   <div class="wrap">
-    <div>AgentTrafficCop — v0.1.0 — 2026</div>
+    <div>AgentTrafficCop — Vol. I · No. 1 · MMXXVI</div>
     <div class="meta">
-      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI</a>
-      <a href="mailto:hello@agenttrafficcop.com">Contact</a>
+      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI ↗</a>
+      <a href="mailto:hello@agenttrafficcop.com">Contact ↗</a>
       <span>MIT</span>
     </div>
   </div>
@@ -921,7 +1073,7 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
     const original = label.textContent;
     const done = () => {
       label.textContent = "copied ✓";
-      label.style.color = "var(--accent)";
+      label.style.color = "var(--gold)";
       setTimeout(() => { label.textContent = original; label.style.color = ""; }, 1500);
     };
     if (navigator.clipboard?.writeText) {
@@ -941,7 +1093,7 @@ guard = Guard(url=<span class="warn">"http://localhost:8000"</span>, api_key=<sp
     entries.forEach(e => {
       if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
     });
-  }, { threshold: 0.12, rootMargin: "0px 0px -80px 0px" });
+  }, { threshold: 0.1, rootMargin: "0px 0px -80px 0px" });
   document.querySelectorAll(".reveal").forEach(el => io.observe(el));
 </script>
 
