@@ -22,6 +22,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import metrics as _metrics_module  # noqa: E402
+from app import usage as _usage_module  # noqa: E402
 from app.main import app  # noqa: E402
 from app.state import session_store  # noqa: E402
 
@@ -36,7 +37,6 @@ INVALID_API_KEY = "not-a-real-key"
 
 
 def _clear_store() -> None:
-    """Clear the in-memory session store."""
     sessions = getattr(session_store, "_sessions", None)
     lock = getattr(session_store, "_lock", None)
     if sessions is None or lock is None:
@@ -46,7 +46,6 @@ def _clear_store() -> None:
 
 
 def _clear_metrics() -> None:
-    """Reset all metrics counters, gauges, and histograms."""
     try:
         _metrics_module._counters._data.clear()
         _metrics_module._gauges._data.clear()
@@ -56,12 +55,6 @@ def _clear_metrics() -> None:
 
 
 def _clear_rate_limiter() -> None:
-    """Reset the in-process rate limiter's call history.
-
-    Test-only concern. Reaches into the module-level limiter and clears
-    its per-client deques so tests don't accumulate usage against each
-    other.
-    """
     try:
         import app.middleware as mw
         limiter = getattr(mw, "_limiter", None)
@@ -75,41 +68,54 @@ def _clear_rate_limiter() -> None:
         pass
 
 
+def _clear_usage() -> None:
+    """Clear the usage counter backend (in-memory variant)."""
+    try:
+        backend = _usage_module.usage_backend
+        data = getattr(backend, "_data", None)
+        lock = getattr(backend, "_lock", None)
+        if data is not None and lock is not None:
+            with lock:
+                data.clear()
+    except Exception:
+        pass
+
+
 # --- Fixtures ----------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """Reset sessions, metrics, and the rate limiter before/after each test.
-
-    autouse=True means this runs automatically for every test without
-    needing to be requested.
-    """
+    """Reset sessions, metrics, rate limiter, and usage before/after each test."""
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
+    _clear_usage()
     yield
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
+    _clear_usage()
 
 
 @pytest.fixture()
 def client():
-    """A FastAPI TestClient bound to the app."""
     with TestClient(app) as c:
         yield c
 
 
 @pytest.fixture()
 def auth_headers():
-    """Authorization header with a valid key."""
     return {"authorization": f"Bearer {VALID_API_KEY}"}
 
 
 @pytest.fixture()
+def second_auth_headers():
+    return {"authorization": f"Bearer {SECOND_API_KEY}"}
+
+
+@pytest.fixture()
 def sample_message():
-    """A valid AgentMessage payload as a dict."""
     return {
         "session_id": "test-session",
         "sender": "coder",
