@@ -87,6 +87,37 @@ class RateLimitError(TrafficCopError):
         self.diagnostics.setdefault("retry_after_seconds", retry_after)
 
 
+class TierLimitExceeded(TrafficCopError):
+    """Raised when an API key has exceeded its monthly tier limit.
+
+    Returns HTTP 429 with a `Retry-After` header pointing at the first
+    second of the next calendar month (in seconds).
+    """
+
+    status_code = 429
+    error_code = "TIER_LIMIT_EXCEEDED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tier: str,
+        used: int,
+        limit: int,
+        reset_at: str,
+        retry_after: int,
+        session_id: str | None = None,
+        diagnostics: Dict[str, Any] | None = None,
+    ) -> None:
+        diag = diagnostics or {}
+        diag.setdefault("tier", tier)
+        diag.setdefault("used", used)
+        diag.setdefault("limit", limit)
+        diag.setdefault("reset_at", reset_at)
+        super().__init__(message, session_id=session_id, diagnostics=diag)
+        self.retry_after = retry_after
+
+
 # ---------------------------------------------------------------------------
 # FastAPI exception handlers
 # ---------------------------------------------------------------------------
@@ -104,9 +135,10 @@ def register_exception_handlers(app: FastAPI) -> None:
             exc.error_code,
             exc.session_id,
         )
-        headers = {}
-        if isinstance(exc, RateLimitError):
+        headers: Dict[str, str] = {}
+        if isinstance(exc, (RateLimitError, TierLimitExceeded)):
             headers["Retry-After"] = str(exc.retry_after)
+        if isinstance(exc, RateLimitError):
             try:
                 audit.log_rate_limited(
                     path=str(_request.url.path),

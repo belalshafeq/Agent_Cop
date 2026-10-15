@@ -6,10 +6,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 ALLOWED_INTENTS = (
     "request",
     "response",
@@ -21,13 +17,11 @@ ALLOWED_INTENTS = (
 
 
 # ---------------------------------------------------------------------------
-# Incoming: agent-to-agent message
+# Incoming
 # ---------------------------------------------------------------------------
 
 
 class AgentMessage(BaseModel):
-    """A single agent-to-agent handoff message."""
-
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
@@ -39,12 +33,8 @@ class AgentMessage(BaseModel):
     sender: str = Field(..., min_length=1, max_length=64)
     recipient: str = Field(..., min_length=1, max_length=64)
     intent: Literal[
-        "request",
-        "response",
-        "handoff",
-        "tool_call",
-        "tool_result",
-        "error",
+        "request", "response", "handoff",
+        "tool_call", "tool_result", "error",
     ] = Field(...)
     payload: Dict[str, Any] = Field(...)
     metadata: Optional[Dict[str, Any]] = Field(default=None)
@@ -73,13 +63,11 @@ class AgentMessage(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Outgoing: successful approval
+# Outgoing
 # ---------------------------------------------------------------------------
 
 
 class RouteApproval(BaseModel):
-    """Successful routing decision."""
-
     model_config = ConfigDict(extra="forbid")
 
     approved: Literal[True] = True
@@ -89,14 +77,7 @@ class RouteApproval(BaseModel):
     message: str = "Message approved and forwarded."
 
 
-# ---------------------------------------------------------------------------
-# Outgoing: health probe
-# ---------------------------------------------------------------------------
-
-
 class HealthResponse(BaseModel):
-    """System health probe response."""
-
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["ok"] = "ok"
@@ -106,18 +87,27 @@ class HealthResponse(BaseModel):
     uptime_seconds: float = Field(..., ge=0.0)
 
 
+class UsageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_key_fingerprint: str = Field(..., min_length=1, max_length=64)
+    tier: Literal["free", "pro", "team", "enterprise"]
+    messages_this_month: int = Field(..., ge=0)
+    tier_limit: int = Field(..., ge=0, description="0 means unlimited.")
+    remaining: Optional[int] = Field(
+        default=None,
+        description="None when the tier is unlimited.",
+    )
+    reset_at: str = Field(..., min_length=1)
+    enforcement_enabled: bool
+
+
 # ---------------------------------------------------------------------------
-# Admin API: session inspection
+# Admin
 # ---------------------------------------------------------------------------
 
 
 class SessionSummary(BaseModel):
-    """Summary row for one session, as returned by GET /v1/sessions.
-
-    Deliberately does NOT include the payload hash history — that can be
-    large, and listing should be cheap.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
@@ -130,8 +120,6 @@ class SessionSummary(BaseModel):
 
 
 class SessionListResponse(BaseModel):
-    """Response for GET /v1/sessions."""
-
     model_config = ConfigDict(extra="forbid")
 
     total: int = Field(..., ge=0)
@@ -140,12 +128,6 @@ class SessionListResponse(BaseModel):
 
 
 class SessionDetailResponse(BaseModel):
-    """Response for GET /v1/sessions/{id}.
-
-    Includes the recent payload hashes for that session so an operator
-    can see the loop pattern without touching the raw store.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
@@ -158,29 +140,13 @@ class SessionDetailResponse(BaseModel):
     idle_seconds: float = Field(..., ge=0.0)
 
 
-# ---------------------------------------------------------------------------
-# Admin API: cleanup
-# ---------------------------------------------------------------------------
-
-
 class CleanupRequest(BaseModel):
-    """Request body for POST /v1/admin/cleanup."""
-
     model_config = ConfigDict(extra="forbid")
 
-    older_than_seconds: int = Field(
-        ...,
-        ge=1,
-        description=(
-            "Sessions whose `last_seen` is older than this many seconds "
-            "will be expired."
-        ),
-    )
+    older_than_seconds: int = Field(..., ge=1)
 
 
 class CleanupResponse(BaseModel):
-    """Response for POST /v1/admin/cleanup."""
-
     model_config = ConfigDict(extra="forbid")
 
     expired: int = Field(..., ge=0)

@@ -1,4 +1,4 @@
-"""HTTP routes: /v1/route, /health, /v1/sessions/*, /metrics."""
+"""HTTP routes: /v1/route, /health, /v1/sessions/*, /v1/usage, /metrics."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from . import __version__, metrics
 from .audit import audit
 from .circuit_breaker import evaluate
 from .config import settings
+from .exceptions import TierLimitExceeded
 from .hashing import payload_hash
 from .middleware import check_rate_limit
 from .schemas import (
@@ -24,10 +25,12 @@ from .schemas import (
     SessionDetailResponse,
     SessionListResponse,
     SessionSummary,
+    UsageResponse,
 )
 from .security import verify_api_key
 from .state import session_store
 from .state_backends import SessionSnapshot
+from .usage import get_usage, is_over_limit, record_message, snapshot
 
 logger = logging.getLogger("agenttrafficcop.routes")
 
@@ -48,7 +51,7 @@ router = APIRouter()
         401: {"description": "Missing or invalid API key."},
         413: {"description": "Request body too large."},
         422: {"description": "Schema validation failed or breaker tripped."},
-        429: {"description": "Rate limit exceeded."},
+        429: {"description": "Rate limit or tier limit exceeded."},
     },
 )
 async def route_message(
@@ -57,14 +60,49 @@ async def route_message(
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> RouteApproval:
     """Governance checkpoint for a single agent-to-agent handoff."""
+    # 1. Per-minute rate limit (cheap, in-process).
     await check_rate_limit(request)
+
+    # 2. Monthly tier limit (per API key).
+    over, tier, used, limit = is_over_limit(key_fingerprint)
+    if over:
+        from .usage import next_month_start_utc
+
+        reset_at = next_month_start_utc()
+        retry_after = _seconds_until_next_month()
+        logger.warning(
+            "tier_limit_exceeded tier=%s used=%d limit=%d fingerprint=%s",
+            tier,
+            used,
+            limit,
+            key_fingerprint,
+        )
+        try:
+            audit.log_rate_limited(
+                path=str(request.url.path),
+                retry_after=retry_after,
+            )
+        except Exception:
+            pass
+        raise TierLimitExceeded(
+            message=(
+                f"Tier '{tier}' limit of {limit} messages per month reached. "
+                f"Resets on {reset_at}."
+            ),
+            tier=tier,
+            used=used,
+            limit=limit,
+            reset_at=reset_at,
+            retry_after=retry_after,
+            session_id=message.session_id,
+        )
 
     started = time.perf_counter()
 
     digest = payload_hash(message.payload)
-    snapshot = session_store.get_or_create(message.session_id)
+    snap = session_store.get_or_create(message.session_id)
     new_snapshot = evaluate(
-        snapshot,
+        snap,
         digest,
         sender=message.sender,
         recipient=message.recipient,
@@ -72,6 +110,10 @@ async def route_message(
     )
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
+
+    # 3. Record usage only AFTER the message is approved. Rejected
+    #    messages (schema failures, breaker trips) do not count.
+    new_usage = record_message(key_fingerprint)
 
     metrics.inc_approved()
     try:
@@ -81,7 +123,8 @@ async def route_message(
 
     logger.info(
         "message_approved session_id=%s sender=%s recipient=%s "
-        "intent=%s step=%d hash=%s elapsed_ms=%.3f key=%s",
+        "intent=%s step=%d hash=%s elapsed_ms=%.3f key=%s "
+        "tier=%s usage_this_month=%d",
         message.session_id,
         message.sender,
         message.recipient,
@@ -90,6 +133,8 @@ async def route_message(
         digest,
         elapsed_ms,
         key_fingerprint,
+        tier,
+        new_usage,
     )
 
     return RouteApproval(
@@ -97,6 +142,38 @@ async def route_message(
         step=new_snapshot.step,
         payload_hash=digest,
     )
+
+
+def _seconds_until_next_month() -> int:
+    """Return the number of seconds from now until the next UTC month start."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    year = now.year + (1 if now.month == 12 else 0)
+    month = 1 if now.month == 12 else now.month + 1
+    next_start = datetime(year, month, 1, tzinfo=timezone.utc)
+    delta = (next_start - now).total_seconds()
+    return max(1, int(delta))
+
+
+# ---------------------------------------------------------------------------
+# Usage endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/v1/usage",
+    response_model=UsageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Show this API key's usage and tier.",
+    responses={401: {"description": "Missing or invalid API key."}},
+)
+async def get_my_usage(
+    key_fingerprint: Annotated[str, Depends(verify_api_key)],
+) -> UsageResponse:
+    """Return the calling key's tier, limit, and messages used this month."""
+    snap = snapshot(key_fingerprint)
+    return UsageResponse(**snap.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -140,16 +217,15 @@ async def health() -> HealthResponse:
 # ---------------------------------------------------------------------------
 
 
-def _snapshot_to_summary(snap: SessionSnapshot, now: float) -> SessionSummary:
-    """Convert a SessionSnapshot into a SessionSummary for listing."""
+def _snapshot_to_summary(s: SessionSnapshot, now: float) -> SessionSummary:
     return SessionSummary(
-        session_id=snap.session_id,
-        step=snap.step,
-        hash_count=len(snap.hashes),
-        created_at=snap.created_at,
-        last_seen=snap.last_seen,
-        age_seconds=max(0.0, now - snap.created_at),
-        idle_seconds=max(0.0, now - snap.last_seen),
+        session_id=s.session_id,
+        step=s.step,
+        hash_count=len(s.hashes),
+        created_at=s.created_at,
+        last_seen=s.last_seen,
+        age_seconds=max(0.0, now - s.created_at),
+        idle_seconds=max(0.0, now - s.last_seen),
     )
 
 
@@ -162,49 +238,23 @@ def _snapshot_to_summary(snap: SessionSnapshot, now: float) -> SessionSummary:
 )
 async def list_sessions(
     _key_fingerprint: Annotated[str, Depends(verify_api_key)],
-    limit: int = Query(
-        default=100,
-        ge=1,
-        le=10_000,
-        description="Maximum number of sessions to return.",
-    ),
-    offset: int = Query(
-        default=0,
-        ge=0,
-        description="Number of sessions to skip (for pagination).",
-    ),
-    min_step: Optional[int] = Query(
-        default=None,
-        ge=0,
-        description=(
-            "If set, only return sessions whose step count is >= this value. "
-            "Useful for finding potentially stuck sessions."
-        ),
-    ),
+    limit: int = Query(default=100, ge=1, le=10_000),
+    offset: int = Query(default=0, ge=0),
+    min_step: Optional[int] = Query(default=None, ge=0),
 ) -> SessionListResponse:
-    """Return a summary of every active session.
-
-    Pagination is applied after filtering. The `total` field reflects
-    the number of sessions that matched the filter, not the number of
-    sessions overall.
-    """
     try:
-        raw_snapshots = session_store.list_sessions()
+        raw = session_store.list_sessions()
     except Exception as e:
         logger.error("list_sessions_failed error=%s", e)
-        raw_snapshots = []
+        raw = []
 
-    # Apply filter.
     if min_step is not None:
-        raw_snapshots = [s for s in raw_snapshots if s.step >= min_step]
+        raw = [s for s in raw if s.step >= min_step]
 
-    # Sort by last_seen descending (most recently active first). This is
-    # the most useful default for an operator scanning the list.
-    raw_snapshots.sort(key=lambda s: s.last_seen, reverse=True)
+    raw.sort(key=lambda s: s.last_seen, reverse=True)
 
-    total = len(raw_snapshots)
-    window = raw_snapshots[offset : offset + limit]
-
+    total = len(raw)
+    window = raw[offset : offset + limit]
     now = time.time()
     summaries = [_snapshot_to_summary(s, now) for s in window]
 
@@ -229,13 +279,8 @@ async def get_session(
     session_id: str,
     _key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> SessionDetailResponse:
-    """Return the full state of one session, including hash history.
-
-    Returns 404 if the session doesn't exist. Never creates a session
-    as a side effect — read-only endpoints must not mutate state.
-    """
     try:
-        snapshot = session_store.get(session_id)
+        snap = session_store.get(session_id)
     except Exception as e:
         logger.error("get_session_failed session_id=%s error=%s", session_id, e)
         raise HTTPException(
@@ -243,7 +288,7 @@ async def get_session(
             detail={"error": "SESSION_LOOKUP_FAILED"},
         )
 
-    if snapshot is None:
+    if snap is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -255,15 +300,16 @@ async def get_session(
 
     now = time.time()
     return SessionDetailResponse(
-        session_id=snapshot.session_id,
-        step=snapshot.step,
-        hash_count=len(snapshot.hashes),
-        hashes=list(snapshot.hashes),
-        created_at=snapshot.created_at,
-        last_seen=snapshot.last_seen,
-        age_seconds=max(0.0, now - snapshot.created_at),
-        idle_seconds=max(0.0, now - snapshot.last_seen),
+        session_id=snap.session_id,
+        step=snap.step,
+        hash_count=len(snap.hashes),
+        hashes=list(snap.hashes),
+        created_at=snap.created_at,
+        last_seen=snap.last_seen,
+        age_seconds=max(0.0, now - snap.created_at),
+        idle_seconds=max(0.0, now - snap.last_seen),
     )
+
 
 # ---------------------------------------------------------------------------
 # Admin: bulk cleanup
@@ -274,7 +320,7 @@ async def get_session(
     "/v1/admin/cleanup",
     response_model=CleanupResponse,
     status_code=status.HTTP_200_OK,
-    summary="Expire sessions idle longer than a threshold (admin).",
+    summary="Expire idle sessions (admin).",
     responses={401: {"description": "Missing or invalid API key."}},
 )
 async def cleanup_sessions(
@@ -282,11 +328,6 @@ async def cleanup_sessions(
     body: CleanupRequest,
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> CleanupResponse:
-    """Remove sessions whose `last_seen` is older than `older_than_seconds`.
-
-    The store is iterated, matching sessions are removed, and the counts
-    of expired and remaining sessions are returned.
-    """
     try:
         snapshots = session_store.list_sessions()
     except Exception as e:
@@ -297,14 +338,14 @@ async def cleanup_sessions(
     cutoff = now - body.older_than_seconds
 
     expired = 0
-    for snap in snapshots:
-        if snap.last_seen < cutoff:
+    for s in snapshots:
+        if s.last_seen < cutoff:
             try:
-                if session_store.reset(snap.session_id):
+                if session_store.reset(s.session_id):
                     expired += 1
                     try:
                         audit.log_reset(
-                            session_id=snap.session_id,
+                            session_id=s.session_id,
                             removed=True,
                             api_key_fingerprint=key_fingerprint,
                         )
@@ -313,7 +354,7 @@ async def cleanup_sessions(
             except Exception as e:
                 logger.warning(
                     "cleanup_reset_failed session_id=%s error=%s",
-                    snap.session_id,
+                    s.session_id,
                     e,
                 )
 
@@ -339,7 +380,7 @@ async def cleanup_sessions(
 
 
 # ---------------------------------------------------------------------------
-# Existing: single-session reset
+# Reset single session
 # ---------------------------------------------------------------------------
 
 
@@ -353,7 +394,6 @@ async def reset_session(
     session_id: str,
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> JSONResponse:
-    """Remove a session from the state engine."""
     removed = session_store.reset(session_id)
     try:
         metrics.set_active_sessions(session_store.active_count())
@@ -369,11 +409,7 @@ async def reset_session(
     except Exception:
         pass
 
-    logger.info(
-        "session_reset session_id=%s removed=%s",
-        session_id,
-        removed,
-    )
+    logger.info("session_reset session_id=%s removed=%s", session_id, removed)
     return JSONResponse(
         status_code=200,
         content={"session_id": session_id, "removed": removed},
@@ -391,16 +427,11 @@ async def reset_session(
     summary="Prometheus metrics endpoint.",
 )
 async def metrics_endpoint() -> Response:
-    """Return all metrics in Prometheus text exposition format."""
     if not settings.metrics_enabled:
         return PlainTextResponse(
             "# metrics disabled\n",
             status_code=200,
             media_type="text/plain; version=0.0.4",
         )
-
     body = metrics.render()
-    return Response(
-        content=body,
-        media_type="text/plain; version=0.0.4",
-    )
+    return Response(content=body, media_type="text/plain; version=0.0.4")
