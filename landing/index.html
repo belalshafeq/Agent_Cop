@@ -3,33 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentTrafficCop — Runtime guardrails for AI agents</title>
-  <meta name="description" content="A runtime circuit breaker and schema shield for multi-agent systems. pip install agenttrafficcop." />
-  <meta name="theme-color" content="#0a0a0a" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230a0a0a'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23fafafa'/%3E%3C/svg%3E" />
+  <title>AgentTrafficCop — Runtime circuit breaker for AI agents</title>
+  <meta name="description" content="Stop your AI agents from burning money in loops. A runtime circuit breaker for multi-agent systems. Install with pip." />
+  <meta name="theme-color" content="#000000" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Cpath d='M30 55L45 70L70 30' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <style>
     :root {
-      --bg: #0a0a0a;
-      --bg-1: #0e0e0e;
-      --fg: #fafafa;
-      --fg-1: #a3a3a3;
-      --fg-2: #737373;
-      --fg-3: #404040;
-      --fg-4: #262626;
-      --line: #1a1a1a;
-      --line-strong: #262626;
+      --bg: #000000;
+      --bg-1: #0a0a0a;
+      --bg-2: #111111;
+      --fg: #ededed;
+      --fg-1: #a1a1a1;
+      --fg-2: #666666;
+      --fg-3: #333333;
+      --line: #1f1f1f;
+      --line-2: #2a2a2a;
+      --accent: #10b981;
+      --accent-2: #34d399;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
       background: var(--bg);
       color: var(--fg);
-      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      font-family: 'Geist', -apple-system, system-ui, sans-serif;
       font-size: 15px;
       line-height: 1.6;
       font-weight: 400;
@@ -41,43 +43,43 @@
 
     ::-webkit-scrollbar { width: 8px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--line-strong); }
-    ::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }
+    ::-webkit-scrollbar-thumb { background: var(--line-2); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--fg-2); }
 
     a { color: inherit; text-decoration: none; }
 
     .mono {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Geist Mono', ui-monospace, monospace;
       font-feature-settings: 'ss01';
       letter-spacing: -0.01em;
     }
 
     .wrap {
-      max-width: 1120px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 0 32px;
     }
 
     .reveal {
       opacity: 0;
-      transform: translateY(12px);
-      transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
-                  transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      transform: translateY(16px);
+      transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .reveal.in { opacity: 1; transform: none; }
-    .d1 { transition-delay: 0.06s; }
-    .d2 { transition-delay: 0.12s; }
-    .d3 { transition-delay: 0.18s; }
+    .d1 { transition-delay: 0.08s; }
+    .d2 { transition-delay: 0.16s; }
+    .d3 { transition-delay: 0.24s; }
 
-    /* HEADER */
+    /* ── Header ── */
     header {
       position: fixed;
       top: 0; left: 0; right: 0;
       z-index: 100;
-      height: 56px;
-      background: rgba(10, 10, 10, 0.72);
-      backdrop-filter: saturate(180%) blur(20px);
-      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      height: 64px;
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: saturate(180%) blur(24px);
+      -webkit-backdrop-filter: saturate(180%) blur(24px);
       border-bottom: 1px solid var(--line);
     }
     header .wrap {
@@ -94,252 +96,331 @@
       font-weight: 500;
       letter-spacing: -0.01em;
     }
-    .brand-dot {
-      width: 6px;
-      height: 6px;
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-2);
+      border-radius: 4px;
+    }
+    .brand-mark::after {
+      content: '';
+      width: 8px;
+      height: 8px;
       background: var(--fg);
       border-radius: 50%;
     }
     .nav-links {
       display: flex;
-      gap: 28px;
+      gap: 32px;
       font-size: 13px;
-      color: var(--fg-2);
+      color: var(--fg-1);
     }
     .nav-links a { transition: color 0.15s; }
     .nav-links a:hover { color: var(--fg); }
     .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       font-size: 13px;
-      color: var(--fg-2);
-      transition: color 0.15s;
+      font-weight: 500;
+      color: var(--fg);
+      background: var(--bg-2);
+      border: 1px solid var(--line-2);
+      padding: 8px 14px;
+      border-radius: 6px;
+      transition: all 0.15s;
     }
-    .nav-cta:hover { color: var(--fg); }
-    @media (max-width: 720px) {
+    .nav-cta:hover {
+      background: var(--fg);
+      color: var(--bg);
+      border-color: var(--fg);
+    }
+    @media (max-width: 780px) {
       .nav-links { display: none; }
     }
 
-    /* HERO */
+    /* ── Hero ── */
     .hero {
-      padding: 200px 0 140px;
+      padding: 180px 0 80px;
+      position: relative;
+      overflow: hidden;
     }
+    /* Subtle radial glow */
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%;
+      width: 900px; height: 600px;
+      transform: translateX(-50%);
+      background: radial-gradient(
+        ellipse at center,
+        rgba(16, 185, 129, 0.08),
+        transparent 60%
+      );
+      pointer-events: none;
+    }
+    /* Fade grid */
+    .hero::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(ellipse at top, black 20%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse at top, black 20%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero .wrap { position: relative; z-index: 1; }
+
     .hero-eyebrow {
       display: inline-flex;
       align-items: center;
-      gap: 10px;
-      font-size: 13px;
-      color: var(--fg-2);
+      gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid var(--line-2);
+      border-radius: 100px;
+      background: var(--bg-1);
+      font-size: 12px;
+      color: var(--fg-1);
       margin-bottom: 40px;
     }
-    .hero-eyebrow .pulse {
+    .hero-eyebrow .dot {
       width: 6px;
       height: 6px;
-      background: #10b981;
+      background: var(--accent);
       border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent);
       animation: pulse 2s ease-in-out infinite;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
+      50% { opacity: 0.4; }
     }
 
     .hero h1 {
-      font-size: clamp(2.75rem, 8vw, 6.5rem);
-      font-weight: 500;
+      font-size: clamp(3rem, 8.5vw, 7.5rem);
+      font-weight: 600;
       line-height: 0.98;
-      letter-spacing: -0.04em;
-      color: var(--fg);
-      margin-bottom: 56px;
-      max-width: 900px;
+      letter-spacing: -0.045em;
+      margin-bottom: 32px;
+      max-width: 1000px;
+      background: linear-gradient(180deg, #ffffff 0%, #a1a1a1 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
     }
     .hero h1 em {
-      font-style: italic;
-      font-weight: 300;
-      color: var(--fg-2);
+      font-style: normal;
+      color: var(--fg-1);
     }
 
     .hero-sub {
-      font-size: clamp(1rem, 1.4vw, 1.125rem);
-      font-weight: 300;
-      line-height: 1.6;
+      font-size: clamp(1rem, 1.35vw, 1.15rem);
+      font-weight: 400;
+      line-height: 1.55;
       color: var(--fg-1);
       max-width: 620px;
-      margin-bottom: 64px;
+      margin-bottom: 48px;
     }
     .hero-sub strong {
       color: var(--fg);
-      font-weight: 400;
+      font-weight: 500;
     }
 
-    .hero-actions {
+    /* Install command + CTAs */
+    .install-row {
       display: flex;
-      gap: 20px;
+      gap: 12px;
       flex-wrap: wrap;
       align-items: center;
-      font-size: 14px;
+      margin-bottom: 64px;
     }
+    .install-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 20px;
+      background: var(--bg-1);
+      border: 1px solid var(--line-2);
+      border-radius: 8px;
+      font-family: 'Geist Mono', monospace;
+      font-size: 13px;
+      color: var(--fg);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .install-btn:hover {
+      border-color: var(--fg-2);
+      background: var(--bg-2);
+    }
+    .install-btn .prompt { color: var(--fg-2); }
+    .install-btn .copy-hint {
+      color: var(--fg-2);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding-left: 12px;
+      border-left: 1px solid var(--line-2);
+    }
+    .install-btn:hover .copy-hint { color: var(--accent); }
 
-    .link-btn {
+    .cta-primary {
       display: inline-flex;
       align-items: center;
       gap: 8px;
+      padding: 14px 22px;
+      background: var(--fg);
+      color: var(--bg);
+      font-weight: 500;
+      font-size: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--fg);
+      transition: all 0.15s;
+    }
+    .cta-primary:hover {
+      background: transparent;
       color: var(--fg);
-      transition: color 0.15s;
-      border-bottom: 1px solid var(--fg-4);
-      padding-bottom: 3px;
     }
-    .link-btn:hover { color: var(--fg-2); border-bottom-color: var(--fg-2); }
-    .link-btn .arrow { transition: transform 0.2s; display: inline-block; }
-    .link-btn:hover .arrow { transform: translate(2px, -2px); }
+    .cta-primary .arrow {
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    .cta-primary:hover .arrow { transform: translate(2px, -2px); }
 
-    .copy-line {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-      color: var(--fg-1);
-      cursor: pointer;
-      transition: color 0.15s;
-      background: none;
-      border: none;
-      padding: 0;
+    /* ── Section structure ── */
+    section.block {
+      padding: 120px 0;
+      border-top: 1px solid var(--line);
+      scroll-margin-top: 80px;
     }
-    .copy-line:hover { color: var(--fg); }
-    .copy-line .prompt { color: var(--fg-3); }
-    .copy-line .copy-hint {
+    .section-label {
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
-      color: var(--fg-3);
-      letter-spacing: 0.05em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
+      color: var(--fg-2);
+      margin-bottom: 20px;
     }
-    .copy-line:hover .copy-hint { color: var(--fg-2); }
-
-    @media (max-width: 720px) {
-      .hero { padding: 140px 0 100px; }
-      .wrap { padding: 0 24px; }
+    .section-title {
+      font-size: clamp(1.75rem, 3.5vw, 3rem);
+      font-weight: 600;
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+      color: var(--fg);
+      max-width: 720px;
+      margin-bottom: 64px;
+    }
+    .section-title em {
+      font-style: normal;
+      color: var(--fg-1);
     }
 
-    /* TERMINAL */
+    /* ── Terminal ── */
     .terminal {
-      background: #050505;
+      background: var(--bg-1);
       border: 1px solid var(--line);
+      border-radius: 12px;
       overflow: hidden;
-      margin: 96px 0 0;
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+        0 40px 100px -40px rgba(0, 0, 0, 0.6);
     }
     .terminal-bar {
-      padding: 12px 20px;
+      padding: 12px 18px;
       border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
-      font-family: 'JetBrains Mono', monospace;
+      align-items: center;
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
-      color: var(--fg-3);
-      letter-spacing: 0.02em;
+      color: var(--fg-2);
+    }
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--line-2);
     }
     .terminal-body {
-      padding: 32px 28px;
-      font-family: 'JetBrains Mono', monospace;
+      padding: 28px 24px;
+      font-family: 'Geist Mono', monospace;
       font-size: 12.5px;
       line-height: 1.85;
       color: var(--fg-1);
       overflow-x: auto;
       white-space: pre;
     }
-    .terminal-body .ok { color: #6ee7b7; }
+    .terminal-body .ok { color: var(--accent-2); }
     .terminal-body .fail { color: #f87171; }
-    .terminal-body .info { color: var(--fg-2); }
-    .terminal-body .dim { color: var(--fg-3); }
+    .terminal-body .info { color: var(--fg-1); }
+    .terminal-body .dim { color: var(--fg-2); }
 
-    @media (max-width: 720px) {
-      .terminal-body { padding: 20px; font-size: 11px; }
-      .terminal { margin-top: 64px; }
-    }
-
-    /* SECTIONS */
-    section.block {
-      padding: 128px 0;
+    /* ── Feature grid ── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
       border-top: 1px solid var(--line);
-      scroll-margin-top: 72px;
+      border-left: 1px solid var(--line);
     }
-    .section-label {
-      font-family: 'JetBrains Mono', monospace;
+    .feature {
+      padding: 40px 32px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+      transition: background 0.2s;
+    }
+    .feature:hover { background: var(--bg-1); }
+    .feature-num {
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--fg-3);
+      color: var(--fg-2);
+      letter-spacing: 0.1em;
       margin-bottom: 24px;
     }
-    .section-title {
-      font-size: clamp(1.75rem, 3.5vw, 3rem);
-      font-weight: 500;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      color: var(--fg);
-      max-width: 720px;
-      margin-bottom: 64px;
-    }
-    .section-title em {
-      font-style: italic;
-      font-weight: 300;
-      color: var(--fg-2);
-    }
-
-    /* FEATURES */
-    .feature-list {
-      border-top: 1px solid var(--line);
-    }
-    .feature-row {
-      display: grid;
-      grid-template-columns: 60px 1fr;
-      gap: 32px;
-      padding: 40px 0;
-      border-bottom: 1px solid var(--line);
-      transition: padding 0.25s cubic-bezier(0.16,1,0.3,1);
-    }
-    .feature-row:hover { padding-left: 12px; }
-    .feature-num {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--fg-3);
-      padding-top: 6px;
-      letter-spacing: 0.1em;
-    }
-    .feature-content h3 {
-      font-size: 20px;
+    .feature h3 {
+      font-size: 17px;
       font-weight: 500;
       letter-spacing: -0.02em;
       color: var(--fg);
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
-    .feature-content p {
-      font-size: 15px;
-      font-weight: 300;
+    .feature p {
+      font-size: 14px;
       line-height: 1.6;
       color: var(--fg-1);
-      max-width: 560px;
     }
-    @media (max-width: 720px) {
-      .feature-row { grid-template-columns: 32px 1fr; gap: 16px; padding: 32px 0; }
-    }
+    @media (max-width: 900px) { .features { grid-template-columns: 1fr; } }
 
-    /* CODE */
+    /* ── Code block ── */
     .code-block {
-      background: #050505;
+      background: var(--bg-1);
       border: 1px solid var(--line);
+      border-radius: 12px;
       overflow: hidden;
     }
     .code-bar {
-      padding: 12px 20px;
+      padding: 12px 18px;
       border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
-      color: var(--fg-3);
+      color: var(--fg-2);
     }
     .code-body {
-      padding: 32px 28px;
-      font-family: 'JetBrains Mono', monospace;
+      padding: 28px 24px;
+      font-family: 'Geist Mono', monospace;
       font-size: 13px;
       line-height: 1.85;
       color: var(--fg-1);
@@ -348,16 +429,41 @@
     }
     .code-body .kw { color: #c4b5fd; }
     .code-body .str { color: #fcd34d; }
-    .code-body .fn { color: #fafafa; }
-    @media (max-width: 720px) {
-      .code-body { padding: 20px; font-size: 11px; }
+    .code-body .fn { color: var(--fg); }
+
+    /* ── Stack strip ── */
+    .stack-strip {
+      padding: 40px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .stack-strip .wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+    .stack-strip .label {
+      font-family: 'Geist Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--fg-2);
+    }
+    .stack-items {
+      display: flex;
+      gap: 32px;
+      flex-wrap: wrap;
+      font-size: 14px;
+      color: var(--fg-1);
+      font-weight: 500;
     }
 
-    /* STATS */
+    /* ── Stats ── */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 0;
       border-top: 1px solid var(--line);
       border-left: 1px solid var(--line);
     }
@@ -368,55 +474,64 @@
     }
     .stat-value {
       font-size: 32px;
-      font-weight: 500;
+      font-weight: 600;
       letter-spacing: -0.03em;
       color: var(--fg);
       margin-bottom: 12px;
       line-height: 1;
     }
     .stat-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: var(--fg-3);
+      color: var(--fg-2);
       margin-bottom: 8px;
     }
     .stat-desc {
       font-size: 13px;
-      font-weight: 300;
-      color: var(--fg-2);
+      color: var(--fg-1);
       line-height: 1.5;
     }
-    @media (max-width: 720px) {
-      .stats { grid-template-columns: repeat(2, 1fr); }
-    }
+    @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 
-    /* PRICING */
+    /* ── Pricing ── */
     .pricing {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 0;
       border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
     }
     .plan {
       padding: 40px 28px;
       border-right: 1px solid var(--line);
       display: flex;
       flex-direction: column;
+      background: var(--bg);
     }
     .plan:last-child { border-right: none; }
+    .plan.featured { background: var(--bg-1); }
     .plan-name {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Geist Mono', monospace;
       font-size: 11px;
       letter-spacing: 0.15em;
       text-transform: uppercase;
-      color: var(--fg-3);
+      color: var(--fg-2);
       margin-bottom: 32px;
+    }
+    .plan-badge {
+      display: inline-block;
+      font-family: 'Geist Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
     }
     .plan-price {
       font-size: 36px;
-      font-weight: 500;
+      font-weight: 600;
       letter-spacing: -0.03em;
       color: var(--fg);
       line-height: 1;
@@ -424,14 +539,12 @@
     }
     .plan-price span {
       font-size: 14px;
-      font-weight: 300;
+      font-weight: 400;
       color: var(--fg-2);
     }
     .plan-period {
       font-size: 13px;
-      font-weight: 300;
-      font-style: italic;
-      color: var(--fg-3);
+      color: var(--fg-2);
       margin-bottom: 32px;
     }
     .plan ul {
@@ -442,7 +555,6 @@
     }
     .plan li {
       font-size: 13px;
-      font-weight: 300;
       color: var(--fg-1);
       padding: 10px 0;
       border-bottom: 1px solid var(--line);
@@ -451,9 +563,10 @@
       align-items: baseline;
     }
     .plan li::before {
-      content: '·';
+      content: '—';
       color: var(--fg-3);
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Geist Mono', monospace;
+      flex-shrink: 0;
     }
     .plan li:last-child { border-bottom: none; }
     .plan .btn {
@@ -461,20 +574,18 @@
       text-align: center;
       padding: 12px 20px;
       font-size: 13px;
+      font-weight: 500;
       color: var(--fg);
-      border: 1px solid var(--line-strong);
+      border: 1px solid var(--line-2);
+      border-radius: 6px;
       transition: all 0.15s;
       background: transparent;
-      font-family: 'Inter', sans-serif;
       cursor: pointer;
     }
     .plan .btn:hover {
       background: var(--fg);
       color: var(--bg);
       border-color: var(--fg);
-    }
-    .plan.featured {
-      background: var(--bg-1);
     }
     .plan.featured .btn {
       background: var(--fg);
@@ -485,50 +596,53 @@
       background: transparent;
       color: var(--fg);
     }
-    .plan-badge {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--fg-2);
-      margin-bottom: 8px;
-    }
     @media (max-width: 900px) {
       .pricing { grid-template-columns: repeat(2, 1fr); }
       .plan:nth-child(2) { border-right: none; }
-      .plan:nth-child(1),
-      .plan:nth-child(2) { border-bottom: 1px solid var(--line); }
+      .plan:nth-child(1), .plan:nth-child(2) { border-bottom: 1px solid var(--line); }
     }
-    @media (max-width: 500px) {
-      .pricing { grid-template-columns: 1fr; }
+    @media (max-width: 520px) {
+      .pricing { grid-template-columns: 1fr; border-radius: 8px; }
       .plan { border-right: none; border-bottom: 1px solid var(--line); }
     }
 
-    /* CTA */
+    /* ── CTA ── */
     .cta {
-      padding: 160px 0;
+      padding: 140px 0;
       border-top: 1px solid var(--line);
+      position: relative;
+      overflow: hidden;
     }
+    .cta::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(16, 185, 129, 0.06),
+        transparent 60%
+      );
+      pointer-events: none;
+    }
+    .cta .wrap { position: relative; }
     .cta h2 {
-      font-size: clamp(2.5rem, 6vw, 5rem);
-      font-weight: 500;
+      font-size: clamp(2.25rem, 5.5vw, 4.5rem);
+      font-weight: 600;
       letter-spacing: -0.04em;
       line-height: 1;
       color: var(--fg);
       max-width: 720px;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
     .cta h2 em {
-      font-style: italic;
-      font-weight: 300;
-      color: var(--fg-2);
+      font-style: normal;
+      color: var(--fg-1);
     }
     .cta p {
       font-size: 16px;
-      font-weight: 300;
       color: var(--fg-1);
       max-width: 480px;
-      margin-bottom: 48px;
+      margin-bottom: 40px;
     }
     .cta-actions {
       display: flex;
@@ -536,26 +650,47 @@
       gap: 20px;
       align-items: flex-start;
     }
+    .cta-links {
+      display: flex;
+      gap: 28px;
+      font-size: 14px;
+    }
+    .cta-links a {
+      color: var(--fg-1);
+      transition: color 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cta-links a:hover { color: var(--fg); }
 
-    /* FOOTER */
+    /* ── Footer ── */
     footer {
-      padding: 40px 0;
+      padding: 48px 0;
       border-top: 1px solid var(--line);
-      font-size: 12px;
-      color: var(--fg-3);
+      font-size: 13px;
+      color: var(--fg-2);
     }
     footer .wrap {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 20px;
     }
     footer .meta {
       display: flex;
-      gap: 24px;
+      gap: 28px;
     }
     footer a { transition: color 0.15s; }
     footer a:hover { color: var(--fg); }
+
+    @media (max-width: 720px) {
+      .wrap { padding: 0 20px; }
+      .hero { padding: 120px 0 60px; }
+      section.block { padding: 80px 0; }
+      .cta { padding: 100px 0; }
+    }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -572,16 +707,19 @@
 <header>
   <div class="wrap">
     <a href="#" class="brand">
-      <span class="brand-dot"></span>
+      <span class="brand-mark"></span>
       <span>AgentTrafficCop</span>
     </a>
     <nav class="nav-links">
       <a href="#features">Features</a>
-      <a href="#how">Integrate</a>
+      <a href="#how">How it works</a>
       <a href="#pricing">Pricing</a>
-      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">Docs</a>
     </nav>
-    <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="nav-cta">Get started →</a>
+    <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="nav-cta">
+      <span>Get started</span>
+      <span>→</span>
+    </a>
   </div>
 </header>
 
@@ -589,60 +727,64 @@
 <section class="hero">
   <div class="wrap">
     <div class="hero-eyebrow reveal">
-      <span class="pulse"></span>
-      <span>v0.1.0 · available on PyPI</span>
+      <span class="dot"></span>
+      <span>v0.1.0 · now available on PyPI</span>
     </div>
 
     <h1 class="reveal d1">
-      Stop your AI agents from<br/>
-      <em>burning money in loops.</em>
+      Stop AI agents from burning money in loops.
     </h1>
 
     <p class="hero-sub reveal d2">
-      A runtime circuit breaker for multi-agent systems. Sits between your agents,
-      validates every handoff, fingerprints every payload, and trips before
-      <strong>$400</strong> becomes <strong>$4,000</strong>.
+      AgentTrafficCop is a runtime circuit breaker for multi-agent systems.
+      It validates every handoff, fingerprints every payload, and trips
+      before a loop empties your API budget.
     </p>
 
-    <div class="hero-actions reveal d3">
-      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="link-btn">
-        View source
+    <div class="install-row reveal d3">
+      <button type="button" class="install-btn" onclick="copyInstall(this)">
+        <span class="prompt">$</span>
+        <span>pip install agenttrafficcop</span>
+        <span class="copy-hint">copy</span>
+      </button>
+      <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="cta-primary">
+        <span>View on GitHub</span>
         <span class="arrow">↗</span>
-      </a>
-      <a href="#demo" class="link-btn">
-        See the demo
-        <span class="arrow">→</span>
       </a>
     </div>
 
-    <!-- Terminal -->
+    <!-- Terminal demo -->
     <div class="terminal reveal d3">
       <div class="terminal-bar">
+        <div class="terminal-dots">
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+        </div>
         <span>python demo.py</span>
-        <span>bash</span>
       </div>
       <div class="terminal-body"><span class="dim">$ python demo.py</span>
 
-<span class="dim">────────────────────────────────────────────</span>
+<span class="dim">──────────────────────────────────────────────</span>
 <span class="dim">RUN 1 · WITHOUT AgentTrafficCop</span>
-<span class="dim">────────────────────────────────────────────</span>
+<span class="dim">──────────────────────────────────────────────</span>
 
-  <span class="info">coder</span>    → reviewer  {'diff': 'rename foo to bar'}
-  <span class="info">reviewer</span> → coder     {'feedback': 'add a docstring'}
-  <span class="info">coder</span>    → reviewer  {'diff': 'add null check'}
-  <span class="info">reviewer</span> → coder     {'feedback': 'handle empty case'}
+  <span class="info">coder</span>     → reviewer  {diff: 'rename foo to bar'}
+  <span class="info">reviewer</span>  → coder     {feedback: 'add a docstring'}
+  <span class="info">coder</span>     → reviewer  {diff: 'add null check'}
+  <span class="info">reviewer</span>  → coder     {feedback: 'handle empty case'}
   <span class="dim">... 20 more rounds ...</span>
 
   <span class="fail">✗ no breaker · 24 messages · cost: $0.10</span>
 
-<span class="dim">────────────────────────────────────────────</span>
+<span class="dim">──────────────────────────────────────────────</span>
 <span class="dim">RUN 2 · WITH AgentTrafficCop</span>
-<span class="dim">────────────────────────────────────────────</span>
+<span class="dim">──────────────────────────────────────────────</span>
 
-  <span class="info">coder</span>    → reviewer  {...}  <span class="ok">✓ step=1</span>
-  <span class="info">reviewer</span> → coder     {...}  <span class="ok">✓ step=2</span>
-  <span class="info">coder</span>    → reviewer  {...}  <span class="ok">✓ step=3</span>
-  <span class="info">reviewer</span> → coder     {...}  <span class="fail">✗ CYCLIC_PAYLOAD_LOOP</span>
+  <span class="info">coder</span>     → reviewer  {...}  <span class="ok">✓ step=1</span>
+  <span class="info">reviewer</span>  → coder     {...}  <span class="ok">✓ step=2</span>
+  <span class="info">coder</span>     → reviewer  {...}  <span class="ok">✓ step=3</span>
+  <span class="info">reviewer</span>  → coder     {...}  <span class="fail">✗ CYCLIC_PAYLOAD_LOOP</span>
 
   <span class="fail">🛑 CIRCUIT BREAKER TRIPPED</span>
   <span class="fail">   error_code : CYCLIC_PAYLOAD_LOOP</span>
@@ -656,45 +798,54 @@
   </div>
 </section>
 
+<!-- STACK STRIP -->
+<div class="stack-strip">
+  <div class="wrap">
+    <span class="label">Built with</span>
+    <div class="stack-items">
+      <span>FastAPI</span>
+      <span>Pydantic v2</span>
+      <span>Redis</span>
+      <span>Docker</span>
+      <span>LangGraph</span>
+      <span>Python 3.11+</span>
+    </div>
+  </div>
+</div>
+
 <!-- FEATURES -->
 <section id="features" class="block">
   <div class="wrap">
     <div class="section-label reveal">01 — Features</div>
     <h2 class="section-title reveal d1">
-      Three things, sitting<br/>
-      between your <em>agents.</em>
+      Three primitives,<br/>
+      sitting between your <em>agents.</em>
     </h2>
 
-    <div class="feature-list reveal d2">
-      <div class="feature-row">
+    <div class="features reveal d2">
+      <div class="feature">
         <div class="feature-num">01</div>
-        <div class="feature-content">
-          <h3>Schema shield</h3>
-          <p>Every handoff validated against a strict Pydantic contract. Malformed payloads get a structured 422 before they reach the next agent.</p>
-        </div>
+        <h3>Schema shield</h3>
+        <p>Every handoff validated against a strict Pydantic v2 contract before it reaches the next agent. Malformed payloads are rejected at the door.</p>
       </div>
-      <div class="feature-row">
+      <div class="feature">
         <div class="feature-num">02</div>
-        <div class="feature-content">
-          <h3>Loop detection</h3>
-          <p>SHA-256 fingerprinting on every payload. Identical repeats and A↔B ping-pongs trip the breaker. Step counters catch the rest.</p>
-        </div>
+        <h3>Loop detection</h3>
+        <p>SHA-256 fingerprinting on every payload. Identical repeats and A↔B ping-pongs trip the breaker. Step counters catch the rest.</p>
       </div>
-      <div class="feature-row">
+      <div class="feature">
         <div class="feature-num">03</div>
-        <div class="feature-content">
-          <h3>Runtime breaker</h3>
-          <p>When thresholds breach, the response carries structured diagnostics. Your orchestrator decides: halt, alert, or escalate.</p>
-        </div>
+        <h3>Circuit breaker</h3>
+        <p>When thresholds breach, the response carries structured diagnostics. Your orchestrator decides: halt, alert, or escalate.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- HOW -->
+<!-- HOW IT WORKS -->
 <section id="how" class="block">
   <div class="wrap">
-    <div class="section-label reveal">02 — Integrate</div>
+    <div class="section-label reveal">02 — How it works</div>
     <h2 class="section-title reveal d1">
       Five lines to add it<br/>
       to your <em>orchestrator.</em>
@@ -721,8 +872,10 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
     print(<span class="str">"loop caught:"</span>, e.error_code)</div>
     </div>
 
-    <p class="reveal d3" style="margin-top: 32px; font-size: 14px; font-weight: 300; color: var(--fg-2); max-width: 560px;">
-      Works with LangGraph, CrewAI, AutoGen, or raw asyncio. Runs as a standalone service.
+    <p class="reveal d3" style="margin-top: 32px; font-size: 14px; color: var(--fg-1); max-width: 620px;">
+      Runs as a standalone FastAPI service. Works with LangGraph, CrewAI,
+      AutoGen, or raw asyncio. The SDK ships a LangGraph adapter — wrap any
+      node in one line.
     </p>
   </div>
 </section>
@@ -743,9 +896,9 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
         <div class="stat-desc">Passing in CI on every commit</div>
       </div>
       <div class="stat">
-        <div class="stat-value">&lt;1ms</div>
-        <div class="stat-label">Overhead</div>
-        <div class="stat-desc">Per handoff, canonical JSON</div>
+        <div class="stat-value">SHA-256</div>
+        <div class="stat-label">Fingerprinting</div>
+        <div class="stat-desc">Deterministic payload hashing</div>
       </div>
       <div class="stat">
         <div class="stat-value">Redis</div>
@@ -769,8 +922,9 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
       Free to start.<br/>
       Scale when you <em>need to.</em>
     </h2>
-    <p class="reveal d2" style="font-size: 15px; font-weight: 300; color: var(--fg-2); max-width: 480px; margin-bottom: 56px;">
-      The middleware and SDK are open source. The managed service is coming soon.
+    <p class="reveal d2" style="font-size: 15px; color: var(--fg-1); max-width: 520px; margin-bottom: 56px;">
+      The middleware and SDK are open source and self-hostable today.
+      Managed tiers are coming soon.
     </p>
 
     <div class="pricing reveal d3">
@@ -788,8 +942,8 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
       </div>
 
       <div class="plan featured">
-        <div class="plan-name">Pro</div>
         <div class="plan-badge">Recommended</div>
+        <div class="plan-name">Pro</div>
         <div class="plan-price">$49<span>/mo</span></div>
         <div class="plan-period">coming soon</div>
         <ul>
@@ -840,20 +994,20 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
       One command to install. Three lines to integrate. Zero runtime dependencies.
     </p>
     <div class="cta-actions reveal d2">
-      <button type="button" class="copy-line" onclick="copyInstall(this)">
+      <button type="button" class="install-btn" onclick="copyInstall(this)">
         <span class="prompt">$</span>
         <span>pip install agenttrafficcop</span>
         <span class="copy-hint">copy</span>
       </button>
-      <div style="display: flex; gap: 24px; font-size: 14px;">
-        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener" class="link-btn">
-          GitHub <span class="arrow">↗</span>
+      <div class="cta-links">
+        <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">
+          GitHub <span>↗</span>
         </a>
-        <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener" class="link-btn">
-          PyPI <span class="arrow">↗</span>
+        <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">
+          PyPI <span>↗</span>
         </a>
-        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact" class="link-btn">
-          Contact <span class="arrow">↗</span>
+        <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact">
+          Contact <span>↗</span>
         </a>
       </div>
     </div>
@@ -863,12 +1017,11 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
 <!-- FOOTER -->
 <footer>
   <div class="wrap">
-    <div>AgentTrafficCop · v0.1.0 · 2026</div>
+    <div>© 2026 AgentTrafficCop · MIT License</div>
     <div class="meta">
       <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
       <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI</a>
       <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact">Contact</a>
-      <span>MIT</span>
     </div>
   </div>
 </footer>
@@ -880,15 +1033,17 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
     const original = label.textContent;
     const done = () => {
       label.textContent = "copied";
-      label.style.color = "var(--fg)";
+      label.style.color = "var(--accent)";
       setTimeout(() => {
         label.textContent = original;
         label.style.color = "";
       }, 1500);
     };
-    if (navigator.clipboard?.writeText) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done).catch(fallback);
-    } else { fallback(); }
+    } else {
+      fallback();
+    }
     function fallback() {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -906,7 +1061,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
         io.unobserve(e.target);
       }
     });
-  }, { threshold: 0.12, rootMargin: "0px 0px -60px 0px" });
+  }, { threshold: 0.1, rootMargin: "0px 0px -60px 0px" });
   document.querySelectorAll(".reveal").forEach(el => io.observe(el));
 </script>
 
