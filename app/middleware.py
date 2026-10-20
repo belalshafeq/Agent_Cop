@@ -24,15 +24,7 @@ logger = logging.getLogger("agenttrafficcop.middleware")
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
-    """Record request count and latency for every HTTP request.
-
-    Runs before any other middleware so it captures the full lifecycle,
-    including responses from the body-size limiter and error handlers.
-
-    Records:
-      * atc_requests_total{endpoint, method, status}  — counter
-      * atc_request_duration_seconds{endpoint}        — histogram
-    """
+    """Record request count and latency for every HTTP request."""
 
     async def dispatch(self, request: Request, call_next):
         endpoint = request.url.path
@@ -43,7 +35,6 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             status_code = response.status_code
         except Exception:
-            # Unhandled exception — record it as a 500, then re-raise.
             duration = time.perf_counter() - started
             try:
                 metrics.inc_request(endpoint, method, 500)
@@ -57,7 +48,6 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             metrics.inc_request(endpoint, method, status_code)
             metrics.observe_latency(endpoint, duration)
         except Exception:
-            # Metrics must never break the request.
             pass
 
         return response
@@ -70,28 +60,28 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
 class _SlidingWindowLimiter:
     """A simple per-key sliding-window rate limiter.
-
-    Tracks timestamps of recent calls per key. Allows up to
-    `max_per_window` calls per `window_seconds`. Thread-safe enough for
-    our use case (asyncio single-threaded event loop).
-
-    NOT suitable for multi-replica deployments — for that, back it with
-    Redis. This is the in-process version.
+    Includes LRU eviction to prevent memory leaks from fake IPs.
     """
 
-    def __init__(self, max_per_window: int, window_seconds: int = 60) -> None:
+    def __init__(self, max_per_window: int, window_seconds: int = 60, max_clients: int = 10000) -> None:
         self._max = max_per_window
         self._window = window_seconds
-        self._calls: Dict[str, Deque[float]] = defaultdict(deque)
+        self._max_clients = max_clients
+        self._calls: Dict[str, Deque[float]] = {}
 
     def check(self, key: str) -> tuple[bool, int]:
-        """Record a call for *key*.
-
-        Returns:
-            (allowed, retry_after_seconds)
-        """
         now = time.monotonic()
         cutoff = now - self._window
+
+        # Memory Leak Fix: If dictionary is too big, clear oldest entries.
+        if len(self._calls) > self._max_clients:
+            keys_to_remove = list(self._calls.keys())[:int(self._max_clients * 0.1)]
+            for k in keys_to_remove:
+                del self._calls[k]
+
+        if key not in self._calls:
+            self._calls[key] = deque()
+            
         calls = self._calls[key]
 
         while calls and calls[0] < cutoff:
@@ -113,28 +103,19 @@ _limiter = _SlidingWindowLimiter(
 
 
 def _client_key(request: Request) -> str:
-    """Identify the caller for rate-limiting purposes."""
     if request.client is not None:
         return request.client.host
     return "unknown"
 
 
 async def check_rate_limit(request: Request) -> None:
-    """Enforce the rate limit for this request.
-
-    Raises `RateLimitError` when the limit is exceeded.
-    """
     key = _client_key(request)
     allowed, retry_after = _limiter.check(key)
     if not allowed:
         from .exceptions import RateLimitError
-
         logger.warning("rate_limit_exceeded client=%s path=%s", key, request.url.path)
         raise RateLimitError(
-            message=(
-                f"Rate limit of {settings.rate_limit_per_minute} "
-                f"requests/minute exceeded."
-            ),
+            message=(f"Rate limit of {settings.rate_limit_per_minute} requests/minute exceeded."),
             retry_after=retry_after,
         )
 
@@ -191,21 +172,10 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 def install_middleware(app: FastAPI) -> None:
-    """Wire HTTP-level protections into the app.
-
-    Order matters: FastAPI/Starlette applies middleware in reverse order
-    of `add_middleware` calls. The last one added runs first on the way
-    in. We want:
-      1. Metrics (outermost — sees everything, even rejected requests)
-      2. Body size (rejects oversized before reading)
-      3. Routes / handlers
-    """
-    # Added first → runs last
     app.add_middleware(
         BodySizeLimitMiddleware,
         max_bytes=settings.max_body_bytes,
     )
-    # Added second → runs first
     app.add_middleware(MetricsMiddleware)
 
     logger.info(

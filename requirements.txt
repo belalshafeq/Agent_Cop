@@ -8,6 +8,7 @@ uvicorn[standard]==0.30.6
 
 # --- Data validation ---
 pydantic>=2.13.0,<3.0.0
+email-validator>=2.0.0
 
 # --- Environment variable loading ---
 python-dotenv==1.0.1
@@ -18,11 +19,10 @@ httpx==0.27.2
 # --- Redis backend (optional; required only if ATC_REDIS_URL is set) ---
 redis>=5.0.0,<6.0.0
 
-# --- Stripe (Billing & Payments) ---
-stripe>=8.0.0
-
 # --- Auth & Hashing ---
 passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.9
 
 # --- Testing ---
 pytest==8.3.3

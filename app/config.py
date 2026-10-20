@@ -88,10 +88,22 @@ class Settings:
         default_factory=lambda: _env_optional_str("ATC_CORS_ORIGINS")
     )
 
+    # --- Auth / JWT ---
+    jwt_secret_key: str = field(
+        default_factory=lambda: _env_str("ATC_JWT_SECRET", "super-secret-change-me-in-prod")
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
+
+    # --- Lemon Squeezy Billing ---
+    lemonsqueezy_checkout_url: Optional[str] = field(
+        default_factory=lambda: _env_optional_str("LEMONSQUEEZY_CHECKOUT_URL")
+    )
+    lemonsqueezy_webhook_secret: Optional[str] = field(
+        default_factory=lambda: _env_optional_str("LEMONSQUEEZY_WEBHOOK_SECRET")
+    )
+
     # --- Tier assignments ---
-    # Any key listed in ATC_API_KEYS is treated as `team`.
-    # Override per key by listing it in the appropriate *_API_KEYS var.
-    # A key listed in multiple tiers resolves to the most permissive tier.
     free_api_keys: Tuple[str, ...] = field(
         default_factory=lambda: _env_key_list("ATC_FREE_API_KEYS")
     )
@@ -106,7 +118,6 @@ class Settings:
     )
 
     # --- Tier message limits (per calendar month) ---
-    # 0 = unlimited
     tier_free_limit: int = field(
         default_factory=lambda: _env_int("ATC_TIER_FREE_LIMIT", 10_000, minimum=0)
     )
@@ -121,12 +132,9 @@ class Settings:
     )
 
     # --- Usage metering ---
-    # If true, requests are rejected when a key exceeds its tier limit.
-    # If false, metering is track-only (useful for testing).
     usage_enforcement_enabled: bool = field(
         default_factory=lambda: _env_bool("ATC_USAGE_ENFORCEMENT_ENABLED", True)
     )
-    # Redis key prefix for usage counters (kept separate from session prefix).
     usage_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_USAGE_KEY_PREFIX", "atc:usage:")
     )
@@ -220,12 +228,6 @@ class Settings:
         )
 
     def tier_for_key(self, key: str) -> str:
-        """Return the tier name for a given raw API key.
-
-        Precedence (most permissive wins):
-            enterprise > team > pro > free
-        Legacy ATC_API_KEYS default to `team`.
-        """
         if key in self.enterprise_api_keys:
             return "enterprise"
         if key in self.team_api_keys or key in self.api_keys:
@@ -234,12 +236,9 @@ class Settings:
             return "pro"
         if key in self.free_api_keys:
             return "free"
-        # Unknown key — treat as free (auth will have already rejected it
-        # in practice; this is a defensive default).
         return "free"
 
     def limit_for_tier(self, tier: str) -> int:
-        """Return the message-per-month limit for a tier (0 = unlimited)."""
         return {
             "free": self.tier_free_limit,
             "pro": self.tier_pro_limit,

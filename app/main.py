@@ -16,6 +16,8 @@ from .exceptions import register_exception_handlers
 from .logging_config import configure_logging
 from .middleware import install_middleware
 from .routes import router
+from .auth import router as auth_router
+from .billing import router as billing_router
 
 configure_logging()
 logger = logging.getLogger("agenttrafficcop.main")
@@ -84,19 +86,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ---------------------------------------------------------------------
-    # CORS
-    # ---------------------------------------------------------------------
-    # The landing page (and any future frontend) runs on a different origin
-    # than the backend. The browser sends a preflight OPTIONS request before
-    # any cross-origin POST — we must explicitly allow it here, or the
-    # browser blocks the real request.
-    #
-    # Origins are read from ATC_CORS_ORIGINS (comma-separated). Defaults
-    # cover local dev, Cloudflare Pages, and the Cloudflare Tunnel URL.
-    #
-    # Note: `allow_credentials=True` cannot be combined with `allow_origins=["*"]`.
-    # We list explicit origins instead.
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:8000",
@@ -106,7 +95,6 @@ def create_app() -> FastAPI:
         "https://agenttrafficcop.com",
         "https://www.agenttrafficcop.com",
     ]
-    # Add anything from the environment.
     extra = [
         o.strip()
         for o in (settings.cors_origins or "").split(",")
@@ -127,6 +115,8 @@ def create_app() -> FastAPI:
     install_middleware(app)
     register_exception_handlers(app)
     app.include_router(router)
+    app.include_router(auth_router)
+    app.include_router(billing_router)
 
     if docs_enabled:
         app.openapi = lambda: _custom_openapi(app)

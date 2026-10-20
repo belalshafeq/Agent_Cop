@@ -45,7 +45,6 @@ class UserStore:
             return User(id=user_id, email=email, password_hash=password_hash)
             
         except Exception as e:
-            # sqlite3 raises IntegrityError for UNIQUE constraint violations
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError("Email already registered") from e
             raise
@@ -76,10 +75,7 @@ class UserStore:
         import secrets
         import hashlib
         
-        # 1. Generate the raw key (e.g., atc_live_xyz...)
         raw_key = f"atc_live_{secrets.token_urlsafe(32)}"
-        
-        # 2. Hash it for storage (never store raw keys)
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         fingerprint = key_hash[:8]
         
@@ -95,7 +91,6 @@ class UserStore:
             conn.commit()
             
         logger.info("api_key_created user_id=%s tier=%s fingerprint=%s", user_id, tier, fingerprint)
-        # Return the raw key exactly ONCE. We only store the hash.
         return raw_key
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:

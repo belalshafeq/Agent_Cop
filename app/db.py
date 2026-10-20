@@ -1,9 +1,4 @@
-"""SQLite database layer for AgentTrafficCop.
-
-Handles user accounts and API keys. Uses SQLite for local development.
-When moving to production, swap the connection string to Postgres and
-change `sqlite3` to `psycopg` (or use SQLAlchemy).
-"""
+"""SQLite database layer for AgentTrafficCop."""
 
 from __future__ import annotations
 
@@ -15,7 +10,6 @@ from typing import Generator
 
 logger = logging.getLogger("agenttrafficcop.db")
 
-# Put the database file at the repo root for local dev.
 DB_PATH = Path(__file__).resolve().parent.parent / "agenttrafficcop.db"
 
 
@@ -23,8 +17,6 @@ def init_db() -> None:
     """Create the tables if they don't exist."""
     with get_db() as conn:
         cursor = conn.cursor()
-        
-        # Users table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,9 +25,6 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # API Keys table
-        # key_hash stores the SHA-256 hash of the key, never the raw key.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +37,6 @@ def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         """)
-        
         conn.commit()
         logger.info("database_initialized path=%s", DB_PATH)
 
@@ -56,13 +44,10 @@ def init_db() -> None:
 @contextmanager
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """Context manager for database connections.
-    
-    Yields:
-        sqlite3.Connection: A connection with row_factory set to sqlite3.Row.
+    We open a new connection per request/operation to avoid thread-locking.
     """
-    # check_same_thread=False is REQUIRED for FastAPI async execution
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row  # Access columns by name
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
