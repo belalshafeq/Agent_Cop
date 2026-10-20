@@ -71,6 +71,33 @@ class UserStore:
             password_hash=row["password_hash"]
         )
 
+    def create_api_key(self, user_id: int, tier: str = "free") -> str:
+        """Generate a new API key, save the hash to DB, return raw key exactly once."""
+        import secrets
+        import hashlib
+        
+        # 1. Generate the raw key (e.g., atc_live_xyz...)
+        raw_key = f"atc_live_{secrets.token_urlsafe(32)}"
+        
+        # 2. Hash it for storage (never store raw keys)
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        fingerprint = key_hash[:8]
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO api_keys (key_hash, fingerprint, user_id, tier) 
+                VALUES (?, ?, ?, ?)
+                """,
+                (key_hash, fingerprint, user_id, tier)
+            )
+            conn.commit()
+            
+        logger.info("api_key_created user_id=%s tier=%s fingerprint=%s", user_id, tier, fingerprint)
+        # Return the raw key exactly ONCE. We only store the hash.
+        return raw_key
+
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against a hash."""
         return pwd_context.verify(plain_password, hashed_password)

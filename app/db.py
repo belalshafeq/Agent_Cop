@@ -60,7 +60,8 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     Yields:
         sqlite3.Connection: A connection with row_factory set to sqlite3.Row.
     """
-    conn = sqlite3.connect(DB_PATH)
+    # check_same_thread=False is REQUIRED for FastAPI async execution
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row  # Access columns by name
     try:
         yield conn

@@ -1,16 +1,4 @@
-"""Per-API-key usage metering.
-
-Tracks how many messages each API key has sent in the current calendar
-month. Backed by Redis when available, in-memory otherwise.
-
-Design:
-  * Storage is per (key_fingerprint, year-month).
-  * Counters are automatically scoped — a new month starts at zero
-    without any explicit reset.
-  * Fail-soft: if the backend is unreachable, calls return safe defaults
-    (0 used) rather than raising. Enforcement is best-effort.
-  * Fingerprints only — the raw API key is never stored or logged.
-"""
+"""Per-API-key usage metering."""
 
 from __future__ import annotations
 
@@ -21,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 from .config import settings
+from .db import get_db
 
 logger = logging.getLogger("agenttrafficcop.usage")
 
@@ -91,11 +80,7 @@ class InMemoryUsageBackend(UsageBackend):
 
 
 class RedisUsageBackend(UsageBackend):
-    """Redis-backed usage counter.
-
-    Uses a single INCR per call. Keys expire at the end of the next
-    month, so old counters clean themselves up automatically.
-    """
+    """Redis-backed usage counter."""
 
     def __init__(self, redis_client, key_prefix: str) -> None:
         self._redis = redis_client
@@ -108,8 +93,6 @@ class RedisUsageBackend(UsageBackend):
         try:
             key = self._key(fingerprint)
             new_value = int(self._redis.incrby(key, int(amount)))
-            # Keep counters for ~62 days; they'll never be read after
-            # the month rolls over anyway.
             self._redis.expire(key, 62 * 24 * 60 * 60)
             return new_value
         except Exception as e:
@@ -177,18 +160,25 @@ def get_usage(fingerprint: str) -> int:
 
 def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
     """Return (tier, limit) for the caller, given their fingerprint.
-
-    Note: this resolves tier from the fingerprint. Because fingerprints
-    are truncated hashes (8 hex chars), we have to check the actual key
-    the fingerprint came from — so callers should pass the raw key
-    through `settings.tier_for_key()` directly instead of relying on
-    this helper. This helper is used where only the fingerprint is
-    available (e.g., in `/v1/usage`), and returns `free` as a safe
-    default if no match is found.
+    
+    Checks the SQLite DB first. If not found, falls back to .env settings.
     """
-    # The API key fingerprint is only 8 hex chars — we cannot recover
-    # the original key from it. We must therefore look up tier by
-    # comparing fingerprints against tier key lists.
+    # --- 1. Check the Database ---
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tier FROM api_keys WHERE fingerprint = ? AND revoked_at IS NULL", 
+                (fingerprint,)
+            )
+            row = cursor.fetchone()
+            if row:
+                tier = row["tier"]
+                return tier, settings.limit_for_tier(tier)
+    except Exception as e:
+        logger.error("db_tier_check_failed error=%s", e)
+
+    # --- 2. Fallback to .env (Legacy/Admin Keys) ---
     from hashlib import sha256
 
     def _fp(k: str) -> str:
@@ -256,14 +246,7 @@ def snapshot(fingerprint: str) -> UsageSnapshot:
 
 
 def is_over_limit(fingerprint: str) -> Tuple[bool, str, int, int]:
-    """Check whether the caller has exceeded their tier limit.
-
-    Returns:
-        (over, tier, used, limit)
-
-    `over` is False when the limit is 0 (unlimited) or when enforcement
-    is disabled.
-    """
+    """Check whether the caller has exceeded their tier limit."""
     if not settings.usage_enforcement_enabled:
         tier, limit = get_tier_and_limit(fingerprint)
         return False, tier, get_usage(fingerprint), limit
