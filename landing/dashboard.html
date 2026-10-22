@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard | AgentTrafficCop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg: #000000; --bg-1: #0a0a0a; --bg-2: #111111; --fg: #ededed; --fg-1: #a1a1a1; --fg-2: #666666; --fg-3: #333333; --line: #1f1f1f; --line-2: #2a2a2a; --accent: #10b981; --accent-2: #34d399; --error: #f87171; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--fg); font-family: 'Geist', -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; min-height: 100vh; display: flex; flex-direction: column; }
+    .mono { font-family: 'Geist Mono', monospace; }
+    a { color: inherit; text-decoration: none; }
+    header { border-bottom: 1px solid var(--line); padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+    .brand-mark { width: 20px; height: 20px; border: 1px solid var(--line-2); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+    .brand-mark::after { content: ''; width: 6px; height: 6px; background: var(--fg); border-radius: 50%; }
+    .main-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+    
+    /* Card */
+    .card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 32px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+    
+    /* Tabs */
+    .auth-tabs { display: flex; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px; margin-bottom: 24px; }
+    .auth-tab { flex: 1; text-align: center; padding: 8px; font-size: 13px; font-weight: 500; color: var(--fg-1); border-radius: 6px; cursor: pointer; transition: all 0.2s; border: none; background: transparent; }
+    .auth-tab:hover { color: var(--fg); }
+    .auth-tab.active { background: var(--bg-2); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-1); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; font-family: 'Geist Mono', monospace; }
+    .input-wrapper { position: relative; }
+    .form-group input { width: 100%; background: var(--bg); border: 1px solid var(--line-2); color: var(--fg); padding: 12px; border-radius: 6px; font-family: 'Geist', sans-serif; outline: none; transition: border-color 0.2s; }
+    .form-group input:focus { border-color: var(--fg-1); }
+    .form-group input.invalid { border-color: var(--error); }
+    
+    /* Password Toggle */
+    .toggle-password { position: absolute; right: 12px; top: 12px; cursor: pointer; color: var(--fg-2); font-size: 12px; font-weight: 500; user-select: none; transition: color 0.2s; }
+    .toggle-password:hover { color: var(--fg); }
+
+    .btn-primary { width: 100%; background: var(--fg); color: var(--bg); border: 1px solid var(--fg); padding: 12px; border-radius: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; margin-top: 8px; display: flex; justify-content: center; align-items: center; gap: 8px; }
+    .btn-primary:hover { background: transparent; color: var(--fg); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    .btn-secondary { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+    .btn-secondary:hover { background: var(--line); }
+
+    .hidden { display: none !important; }
+    .error-msg { color: var(--error); font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
+
+    /* Dashboard specific */
+    .dashboard-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+    .dashboard-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+    .dashboard-email { color: var(--fg-1); font-size: 13px; margin-top: 4px; }
+    .tier-box { background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+    .tier-label { font-size: 11px; font-family: 'Geist Mono', monospace; color: var(--fg-2); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+    .tier-value { font-size: 24px; font-weight: 600; color: var(--accent); text-transform: uppercase; }
+    .key-box { background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 20px; }
+    .fingerprint { font-family: 'Geist Mono', monospace; color: #fcd34d; font-size: 18px; margin-top: 8px; }
+    .new-key-alert { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 16px; margin-top: 16px; position: relative; }
+    .new-key-label { color: var(--accent-2); font-size: 12px; font-weight: 500; margin-bottom: 4px; }
+    .new-key-value { font-family: 'Geist Mono', monospace; font-size: 14px; word-break: break-all; color: var(--fg); padding-right: 60px; }
+    .copy-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--accent); color: var(--bg); border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    .copy-btn:hover { opacity: 0.8; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a href="index.html" class="brand">
+      <span class="brand-mark"></span>
+      <span>AgentTrafficCop</span>
+    </a>
+  </header>
+
+  <div class="main-container">
+    <!-- AUTH SECTION -->
+    <div id="auth-section" class="card">
+      
+      <!-- TABS -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Sign In</button>
+        <button class="auth-tab" id="tab-register" onclick="switchAuthMode('register')">Create Account</button>
+      </div>
+
+      <h2 id="auth-title" style="font-size: 20px; margin-bottom: 8px;">Welcome back</h2>
+      <p id="auth-subtitle" style="color: var(--fg-1); margin-bottom: 24px; font-size: 14px;">Sign in to manage your keys.</p>
+      
+      <form id="auth-form" novalidate>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="email" required placeholder="you@company.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="password" required minlength="8" maxlength="72" placeholder="••••••••" autocomplete="current-password" />
+            <span class="toggle-password" onclick="togglePassword('password', this)">SHOW</span>
+          </div>
+        </div>
+        <div class="form-group hidden" id="confirm-password-group">
+          <label>Confirm Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="confirm-password" minlength="8" maxlength="72" placeholder="••••••••" autocomplete="new-password" />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" id="submit-btn">Sign In</button>
+      </form>
+      <p id="auth-error" class="error-msg"></p>
+    </div>
+
+    <!-- DASHBOARD SECTION -->
+    <div id="dashboard-section" class="card hidden">
+      <div class="dashboard-header">
+        <div>
+          <div class="dashboard-title">Your Workspace</div>
+          <div class="dashboard-email" id="user-email">loading...</div>
+        </div>
+        <button onclick="logout()" class="btn-secondary">Sign Out</button>
+      </div>
+
+      <div class="tier-box">
+        <div class="tier-label">Current Plan</div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="tier-value" id="user-tier">Free</div>
+          <button id="upgrade-btn" class="btn-primary" onclick="upgradePlan()" style="width: auto; padding: 8px 16px; margin-top: 0; font-size: 13px;">Upgrade to Pro</button>
+        </div>
+      </div>
+
+      <!-- Protected Agents Box -->
+      <div class="key-box" style="margin-bottom: 24px;">
+        <div class="tier-label">Protected Agents</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
+          <div class="fingerprint" id="agents-count" style="color: var(--fg); font-size: 24px;">0</div>
+          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="agents-limit">5</span> agents</div>
+        </div>
+        <div style="width: 100%; height: 8px; background: var(--line); border-radius: 4px; margin-top: 12px; overflow: hidden;">
+          <div id="agents-progress" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.5s ease;"></div>
+        </div>
+      </div>
+
+      <!-- Monthly Messages Box -->
+      <div class="key-box" style="margin-bottom: 24px;">
+        <div class="tier-label">Monthly Messages</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
+          <div class="fingerprint" id="usage-count" style="color: var(--fg); font-size: 24px;">0</div>
+          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="usage-limit">10,000</span> msgs</div>
+        </div>
+        <div style="width: 100%; height: 8px; background: var(--line); border-radius: 4px; margin-top: 12px; overflow: hidden;">
+          <div id="usage-progress" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.5s ease;"></div>
+        </div>
+        <div style="margin-top: 12px; font-size: 12px; color: var(--fg-2);">
+          Resets on <span id="usage-reset">...</span>
+        </div>
+      </div>
+
+      <div class="key-box">
+        <div class="tier-label">Active API Key Fingerprint</div>
+        <div class="fingerprint" id="api-fingerprint">••••••••</div>
+        
+        <p style="font-size: 12px; color: var(--fg-2); margin-top: 12px; line-height: 1.4;">
+          For security, keys are only shown once upon creation. If lost, generate a new one.
+        </p>
+
+        <div style="margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 13px; color: var(--fg-1);">Need a new key?</div>
+          <button onclick="generateKey()" class="btn-secondary">Generate Key</button>
+        </div>
+        <div id="new-key-display" class="new-key-alert hidden">
+          <div class="new-key-label">Save this key. It will not be shown again.</div>
+          <div class="new-key-value" id="new-key"></div>
+          <button class="copy-btn" onclick="copyKey()">COPY</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Smart API Base Detection ---
+    const hostname = window.location.hostname;
+    let API_BASE;
+
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      API_BASE = 'http://localhost:8000';
+    } else if (hostname.includes('github.dev')) {
+      API_BASE = 'https://octwz-20-192-21-51.run.pinggy-free.link'; 
+    } else {
+      API_BASE = 'https://YOUR-RENDER-URL-HERE.onrender.com'; // REPLACE ON DEPLOY
+    }
+
+    // --- Wake up Render ---
+    fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => console.log("Waking server..."));
+
+    let currentMode = 'login';
+
+    // --- UI Helpers ---
+    function togglePassword(inputId, el) {
+      const input = document.getElementById(inputId);
+      input.type = input.type === 'password' ? 'text' : 'password';
+      el.textContent = input.type === 'password' ? 'SHOW' : 'HIDE';
+    }
+
+    function switchAuthMode(mode) {
+      currentMode = mode;
+      document.getElementById('auth-form').reset();
+      document.getElementById('password').type = 'password';
+      document.querySelectorAll('.toggle-password').forEach(el => el.textContent = 'SHOW');
+      document.getElementById('auth-error').textContent = '';
+      document.getElementById('email').classList.remove('invalid');
+      document.getElementById('tab-login').classList.toggle('active', mode === 'login');
+      document.getElementById('tab-register').classList.toggle('active', mode === 'register');
+      document.getElementById('auth-title').textContent = mode === 'login' ? 'Welcome back' : 'Create an account';
+      document.getElementById('auth-subtitle').textContent = mode === 'login' ? 'Sign in to manage your keys.' : 'Start governing your agents today.';
+      document.getElementById('submit-btn').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
+      document.getElementById('confirm-password-group').classList.toggle('hidden', mode === 'login');
+      document.getElementById('confirm-password').required = mode === 'register';
+    }
+
+    // Clear errors when typing
+    document.getElementById('email').addEventListener('input', () => {
+        document.getElementById('auth-error').textContent = '';
+        document.getElementById('email').classList.remove('invalid');
+    });
+    document.getElementById('password').addEventListener('input', () => {
+        document.getElementById('auth-error').textContent = '';
+    });
+
+    // --- Form Submission ---
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const confirmPassword = document.getElementById('confirm-password').value;
+      const btn = document.getElementById('submit-btn');
+      const errorEl = document.getElementById('auth-error');
+      const emailInput = document.getElementById('email');
+      
+      // Frontend Email Validation (Regex)
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errorEl.textContent = "Please enter a valid email address.";
+        emailInput.classList.add('invalid');
+        return;
+      }
+
+      // Password Match Validation
+      if (currentMode === 'register' && password !== confirmPassword) {
+        errorEl.textContent = "Passwords do not match.";
+        return;
+      }
+
+      btn.textContent = "Please wait...";
+      btn.disabled = true;
+      errorEl.textContent = '';
+
+      try {
+        let res;
+        
+        if (currentMode === 'login') {
+          const formData = new URLSearchParams();
+          formData.append('username', email);
+          formData.append('password', password);
+          
+          res = await fetch(`${API_BASE}/v1/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+          });
+        } else {
+          res = await fetch(`${API_BASE}/v1/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+        }
+
+        const data = await res.json();
+        
+        if (!res.ok) {
+          let errMsg = 'Authentication failed';
+          
+          if (data.error === 'SCHEMA_VALIDATION_FAILED' && data.diagnostics?.validation_errors) {
+             errMsg = data.diagnostics.validation_errors[0].msg;
+             if (errMsg.includes('valid email')) { 
+                 errMsg = 'Please enter a valid email address.'; 
+                 emailInput.classList.add('invalid'); 
+             }
+          } else if (typeof data.detail === 'string') { 
+             errMsg = data.detail; 
+          } else if (Array.isArray(data.detail)) { 
+             errMsg = data.detail[0].msg; 
+          } else if (data.message) { 
+             errMsg = data.message; 
+          }
+          
+          throw new Error(errMsg);
+        }
+
+        localStorage.setItem('atc_token', data.access_token);
+        
+        if (data.api_key) {
+          showNewKey(data.api_key);
+        }
+        
+        showDashboard();
+
+      } catch (err) {
+        errorEl.textContent = err.message;
+      } finally {
+        btn.textContent = currentMode === 'login' ? 'Sign In' : 'Create Account';
+        btn.disabled = false;
+      }
+    });
+
+    // --- Dashboard Logic ---
+    async function showDashboard() {
+      const token = localStorage.getItem('atc_token');
+      if (!token) return;
+      
+      document.getElementById('auth-section').classList.add('hidden');
+      document.getElementById('dashboard-section').classList.remove('hidden');
+      
+      try {
+        // 1. Fetch Profile
+        const res = await fetch(`${API_BASE}/v1/auth/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!res.ok) {
+          if (res.status === 401) return logout();
+          throw new Error('Failed to load profile');
+        }
+        
+        const data = await res.json();
+        document.getElementById('user-email').textContent = data.email;
+        document.getElementById('user-tier').textContent = data.tier;
+        document.getElementById('api-fingerprint').textContent = data.api_key_fingerprint;
+        
+        if (data.tier !== 'free') {
+          document.getElementById('upgrade-btn').classList.add('hidden');
+        }
+
+        // 2. Fetch Usage (messages + agents)
+        const usageRes = await fetch(`${API_BASE}/v1/auth/usage`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (usageRes.ok) {
+          const usage = await usageRes.json();
+
+          // --- Messages progress ---
+          document.getElementById('usage-count').textContent = usage.messages_this_month.toLocaleString();
+          document.getElementById('usage-limit').textContent = usage.tier_limit.toLocaleString();
+          const msgPercent = usage.tier_limit > 0 ? Math.min((usage.messages_this_month / usage.tier_limit) * 100, 100) : 0;
+          const msgBar = document.getElementById('usage-progress');
+          msgBar.style.width = `${msgPercent}%`;
+          if (msgPercent > 90) msgBar.style.background = 'var(--error)';
+          else if (msgPercent > 75) msgBar.style.background = '#fcd34d';
+          else msgBar.style.background = 'var(--accent)';
+
+          // --- Agents progress ---
+          document.getElementById('agents-count').textContent = (usage.agents_this_month || 0).toLocaleString();
+          document.getElementById('agents-limit').textContent = (usage.agent_limit || 5).toLocaleString();
+          const agentPercent = usage.agent_limit > 0 ? Math.min(((usage.agents_this_month || 0) / usage.agent_limit) * 100, 100) : 0;
+          const agentBar = document.getElementById('agents-progress');
+          agentBar.style.width = `${agentPercent}%`;
+          if (agentPercent > 90) agentBar.style.background = 'var(--error)';
+          else if (agentPercent > 75) agentBar.style.background = '#fcd34d';
+          else agentBar.style.background = 'var(--accent)';
+
+          // --- Reset date ---
+          const resetDate = new Date(usage.reset_at);
+          document.getElementById('usage-reset').textContent = resetDate.toLocaleDateString();
+        }
+
+      } catch (err) { 
+        console.error(err); 
+      }
+    }
+
+    async function generateKey() {
+      const token = localStorage.getItem('atc_token');
+      try {
+        const res = await fetch(`${API_BASE}/v1/auth/keys`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.status === 401) return logout();
+        const data = await res.json();
+        if (res.ok) {
+          showNewKey(data.api_key);
+          showDashboard();
+        } else {
+          alert(data.detail || data.message || "Failed to generate key.");
+        }
+      } catch (err) {
+        alert("Failed to generate key");
+      }
+    }
+
+    function showNewKey(key) {
+      document.getElementById('new-key-display').classList.remove('hidden');
+      document.getElementById('new-key').textContent = key;
+    }
+
+    function copyKey() {
+      const key = document.getElementById('new-key').textContent;
+      navigator.clipboard.writeText(key).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = 'COPIED!';
+        btn.style.background = 'var(--fg)';
+        setTimeout(() => { 
+            btn.textContent = 'COPY'; 
+            btn.style.background = 'var(--accent)'; 
+        }, 2000);
+      });
+    }
+
+    async function upgradePlan() {
+      const token = localStorage.getItem('atc_token');
+      try {
+        const res = await fetch(`${API_BASE}/v1/billing/checkout`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.status === 401) return logout();
+        const data = await res.json();
+        if (res.ok && data.checkout_url) {
+          window.location.href = data.checkout_url;
+        } else {
+          alert(data.detail || data.message || "Billing not configured yet.");
+        }
+      } catch (err) {
+        alert("Failed to connect to billing system");
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('atc_token');
+      window.location.reload();
+    }
+  </script>
+</body>
+</html>

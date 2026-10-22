@@ -88,11 +88,7 @@ class RateLimitError(TrafficCopError):
 
 
 class TierLimitExceeded(TrafficCopError):
-    """Raised when an API key has exceeded its monthly tier limit.
-
-    Returns HTTP 429 with a `Retry-After` header pointing at the first
-    second of the next calendar month (in seconds).
-    """
+    """Raised when an API key has exceeded its monthly tier limit."""
 
     status_code = 429
     error_code = "TIER_LIMIT_EXCEEDED"
@@ -116,6 +112,36 @@ class TierLimitExceeded(TrafficCopError):
         diag.setdefault("reset_at", reset_at)
         super().__init__(message, session_id=session_id, diagnostics=diag)
         self.retry_after = retry_after
+
+
+class AgentLimitExceeded(TrafficCopError):
+    """Raised when a handoff would introduce unique agents beyond the tier limit.
+
+    Returns HTTP 402 Payment Required — semantically the correct code
+    for "you need to upgrade to protect more agents."
+    """
+
+    status_code = 402
+    error_code = "AGENT_LIMIT_EXCEEDED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tier: str,
+        current_agents: int,
+        limit: int,
+        attempted_new: list[str] | None = None,
+        session_id: str | None = None,
+        diagnostics: Dict[str, Any] | None = None,
+    ) -> None:
+        diag = diagnostics or {}
+        diag.setdefault("tier", tier)
+        diag.setdefault("current_agents", current_agents)
+        diag.setdefault("agent_limit", limit)
+        if attempted_new:
+            diag.setdefault("attempted_new_agents", attempted_new)
+        super().__init__(message, session_id=session_id, diagnostics=diag)
 
 
 # ---------------------------------------------------------------------------

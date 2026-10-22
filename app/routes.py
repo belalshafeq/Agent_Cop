@@ -13,7 +13,7 @@ from . import __version__, metrics
 from .audit import audit
 from .circuit_breaker import evaluate
 from .config import settings
-from .exceptions import TierLimitExceeded
+from .exceptions import AgentLimitExceeded, TierLimitExceeded
 from .hashing import payload_hash
 from .middleware import check_rate_limit
 from .schemas import (
@@ -30,7 +30,15 @@ from .schemas import (
 from .security import verify_api_key
 from .state import session_store
 from .state_backends import SessionSnapshot
-from .usage import get_usage, is_over_limit, record_message, snapshot
+from .usage import (
+    get_agents_set,
+    get_tier_and_limit,
+    get_usage,
+    is_over_limit,
+    record_agents,
+    record_message,
+    snapshot,
+)
 
 logger = logging.getLogger("agenttrafficcop.routes")
 
@@ -49,6 +57,7 @@ router = APIRouter()
     summary="Evaluate and approve an inter-agent message.",
     responses={
         401: {"description": "Missing or invalid API key."},
+        402: {"description": "Agent limit exceeded. Upgrade required."},
         413: {"description": "Request body too large."},
         422: {"description": "Schema validation failed or breaker tripped."},
         429: {"description": "Rate limit or tier limit exceeded."},
@@ -60,10 +69,39 @@ async def route_message(
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> RouteApproval:
     """Governance checkpoint for a single agent-to-agent handoff."""
-    # 1. Per-minute rate limit (cheap, in-process).
-    await check_rate_limit(request)
+    # 1. Per-minute rate limit (Tier-based).
+    await check_rate_limit(request, key_fingerprint)
 
-    # 2. Monthly tier limit (per API key).
+    # 2. Agent limit check — enforced BEFORE message counting so the user
+    #    sees a clear "upgrade to protect more agents" 402 instead of a
+    #    generic 429.
+    tier, _ = get_tier_and_limit(key_fingerprint)
+    agent_limit = settings.agent_limit_for_tier(tier)
+    if agent_limit > 0:
+        current_agents = get_agents_set(key_fingerprint)
+        new_agents = {message.sender, message.recipient} - current_agents
+        if len(current_agents) + len(new_agents) > agent_limit:
+            logger.warning(
+                "agent_limit_exceeded tier=%s current=%d limit=%d key=%s",
+                tier,
+                len(current_agents),
+                agent_limit,
+                key_fingerprint,
+            )
+            raise AgentLimitExceeded(
+                message=(
+                    f"Adding this handoff would introduce agents beyond your "
+                    f"{tier} tier limit of {agent_limit} unique agents per month. "
+                    f"Upgrade to protect more agents."
+                ),
+                tier=tier,
+                current_agents=len(current_agents),
+                limit=agent_limit,
+                attempted_new=sorted(new_agents),
+                session_id=message.session_id,
+            )
+
+    # 3. Monthly tier limit (per API key).
     over, tier, used, limit = is_over_limit(key_fingerprint)
     if over:
         from .usage import next_month_start_utc
@@ -111,9 +149,10 @@ async def route_message(
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
 
-    # 3. Record usage only AFTER the message is approved. Rejected
+    # 4. Record usage only AFTER the message is approved. Rejected
     #    messages (schema failures, breaker trips) do not count.
     new_usage = record_message(key_fingerprint)
+    record_agents(key_fingerprint, message.sender, message.recipient)
 
     metrics.inc_approved()
     try:

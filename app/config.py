@@ -103,7 +103,15 @@ class Settings:
         default_factory=lambda: _env_optional_str("LEMONSQUEEZY_WEBHOOK_SECRET")
     )
 
+    # --- Error Tracking ---
+    sentry_dsn: Optional[str] = field(
+        default_factory=lambda: _env_optional_str("SENTRY_DSN")
+    )
+
     # --- Tier assignments ---
+    # Any key listed in ATC_API_KEYS is treated as `team`.
+    # Override per key by listing it in the appropriate *_API_KEYS var.
+    # A key listed in multiple tiers resolves to the most permissive tier.
     free_api_keys: Tuple[str, ...] = field(
         default_factory=lambda: _env_key_list("ATC_FREE_API_KEYS")
     )
@@ -113,11 +121,9 @@ class Settings:
     team_api_keys: Tuple[str, ...] = field(
         default_factory=lambda: _env_key_list("ATC_TEAM_API_KEYS")
     )
-    enterprise_api_keys: Tuple[str, ...] = field(
-        default_factory=lambda: _env_key_list("ATC_ENTERPRISE_API_KEYS")
-    )
 
     # --- Tier message limits (per calendar month) ---
+    # 0 = unlimited
     tier_free_limit: int = field(
         default_factory=lambda: _env_int("ATC_TIER_FREE_LIMIT", 10_000, minimum=0)
     )
@@ -127,14 +133,38 @@ class Settings:
     tier_team_limit: int = field(
         default_factory=lambda: _env_int("ATC_TIER_TEAM_LIMIT", 2_000_000, minimum=0)
     )
-    tier_enterprise_limit: int = field(
-        default_factory=lambda: _env_int("ATC_TIER_ENTERPRISE_LIMIT", 0, minimum=0)
+
+    # --- Tier agent limits (max unique agents per month) ---
+    # 0 = unlimited. An "agent" is a unique sender/recipient identity
+    # that appears in a handoff routed through the cop.
+    tier_free_agents: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_FREE_AGENTS", 5, minimum=0)
+    )
+    tier_pro_agents: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_PRO_AGENTS", 25, minimum=0)
+    )
+    tier_team_agents: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_TEAM_AGENTS", 100, minimum=0)
+    )
+
+    # --- Tier Rate Limits (Requests per minute) ---
+    tier_free_rate_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_FREE_RATE_LIMIT", 60, minimum=1)
+    )
+    tier_pro_rate_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_PRO_RATE_LIMIT", 120, minimum=1)
+    )
+    tier_team_rate_limit: int = field(
+        default_factory=lambda: _env_int("ATC_TIER_TEAM_RATE_LIMIT", 300, minimum=1)
     )
 
     # --- Usage metering ---
+    # If true, requests are rejected when a key exceeds its tier limit.
+    # If false, metering is track-only (useful for testing).
     usage_enforcement_enabled: bool = field(
         default_factory=lambda: _env_bool("ATC_USAGE_ENFORCEMENT_ENABLED", True)
     )
+    # Redis key prefix for usage counters (kept separate from session prefix).
     usage_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_USAGE_KEY_PREFIX", "atc:usage:")
     )
@@ -224,27 +254,55 @@ class Settings:
             self.free_api_keys
             + self.pro_api_keys
             + self.team_api_keys
-            + self.enterprise_api_keys
         )
 
     def tier_for_key(self, key: str) -> str:
-        if key in self.enterprise_api_keys:
-            return "enterprise"
+        """Return the tier name for a given raw API key.
+
+        Precedence (most permissive wins):
+            team > pro > free
+        Legacy ATC_API_KEYS default to `team`.
+        """
         if key in self.team_api_keys or key in self.api_keys:
             return "team"
         if key in self.pro_api_keys:
             return "pro"
         if key in self.free_api_keys:
             return "free"
+        # Unknown key — treat as free (auth will have already rejected it
+        # in practice; this is a defensive default).
         return "free"
 
     def limit_for_tier(self, tier: str) -> int:
+        """Return the message-per-month limit for a tier (0 = unlimited)."""
         return {
             "free": self.tier_free_limit,
             "pro": self.tier_pro_limit,
             "team": self.tier_team_limit,
-            "enterprise": self.tier_enterprise_limit,
         }.get(tier, self.tier_free_limit)
+
+    def agent_limit_for_tier(self, tier: str) -> int:
+        """Return the unique-agents-per-month limit for a tier (0 = unlimited)."""
+        return {
+            "free": self.tier_free_agents,
+            "pro": self.tier_pro_agents,
+            "team": self.tier_team_agents,
+        }.get(tier, self.tier_free_agents)
+
+    def rate_limit_for_tier(self, tier: str) -> int:
+        """Return the requests-per-minute limit for a tier."""
+        return {
+            "free": self.tier_free_rate_limit,
+            "pro": self.tier_pro_rate_limit,
+            "team": self.tier_team_rate_limit,
+        }.get(tier, self.rate_limit_per_minute)
 
 
 settings = Settings()
+
+# --- Production Safety Checks ---
+if settings.is_production and settings.jwt_secret_key == "super-secret-change-me-in-prod":
+    raise RuntimeError(
+        "FATAL: You are running in production but haven't set ATC_JWT_SECRET. "
+        "This is a massive security risk. Set the environment variable."
+    )

@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from . import __version__
 from .audit import audit
@@ -47,6 +49,16 @@ def _custom_openapi(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # --- Sentry Initialization (Only if DSN is provided) ---
+    if settings.sentry_dsn:
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            integrations=[FastApiIntegration()],
+            traces_sample_rate=1.0,
+            environment=settings.environment,
+        )
+        logger.info("sentry_initialized")
+
     docs_enabled = not settings.is_production
 
     @asynccontextmanager
@@ -86,6 +98,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # ---------------------------------------------------------------------
+    # CORS
+    # ---------------------------------------------------------------------
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:8000",
@@ -95,6 +110,7 @@ def create_app() -> FastAPI:
         "https://agenttrafficcop.com",
         "https://www.agenttrafficcop.com",
     ]
+    # Add anything from the environment.
     extra = [
         o.strip()
         for o in (settings.cors_origins or "").split(",")
@@ -105,6 +121,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
+        # This regex allows ANY GitHub Codespaces URL (for dev) and Cloudflare Pages previews
+        allow_origin_regex=r"https://.*\.(github\.dev|pages\.dev)",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["content-type", "authorization"],

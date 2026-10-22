@@ -1,8 +1,4 @@
-"""Shared fixtures for the AgentTrafficCop SDK test suite.
-
-Uses the SAME API keys as the main test suite so both conftests can be
-loaded in the same pytest session without env-var collisions.
-"""
+"""Shared fixtures for the AgentTrafficCop SDK test suite."""
 
 from __future__ import annotations
 
@@ -36,20 +32,15 @@ import pytest  # noqa: E402
 from httpx import ASGITransport  # noqa: E402
 
 import app.metrics as _metrics_module  # noqa: E402
+import app.usage as _usage_module  # noqa: E402
 from app.main import app  # noqa: E402
 from app.state import session_store  # noqa: E402
 
-
-# --- Constants ---------------------------------------------------------------
-# These MUST match the API keys configured in os.environ above.
 
 VALID_API_KEY = "test-key-1"
 SECOND_API_KEY = "test-key-2"
 INVALID_API_KEY = "not-a-real-key"
 SDK_BASE_URL = "http://testserver"
-
-
-# --- Reset helpers -----------------------------------------------------------
 
 
 def _clear_store() -> None:
@@ -71,32 +62,61 @@ def _clear_metrics() -> None:
 
 
 def _clear_rate_limiter() -> None:
+    """Clear ALL tier-based rate limiters (dict _limiters, not _limiter)."""
     try:
         import app.middleware as mw
-        limiter = getattr(mw, "_limiter", None)
-        if limiter is None:
+        limiters = getattr(mw, "_limiters", None)
+        if limiters is None:
             return
-        calls = getattr(limiter, "_calls", None)
-        if calls is None:
-            return
-        calls.clear()
+        for limiter in limiters.values():
+            calls = getattr(limiter, "_calls", None)
+            if calls is not None:
+                calls.clear()
     except Exception:
         pass
 
 
-# --- Fixtures ----------------------------------------------------------------
+def _clear_usage() -> None:
+    """Clear the message counter and agent identity set."""
+    try:
+        backend = _usage_module.usage_backend
+        lock = getattr(backend, "_lock", None)
+        data = getattr(backend, "_data", None)
+        agents = getattr(backend, "_agents", None)
+        if lock is None:
+            return
+        with lock:
+            if data is not None:
+                data.clear()
+            if agents is not None:
+                agents.clear()
+    except Exception:
+        pass
+
+
+def _clear_usage_caches() -> None:
+    """Clear the @lru_cache wrappers on usage.py lookups."""
+    try:
+        _usage_module._resolve_usage_key.cache_clear()
+        _usage_module.get_tier_and_limit.cache_clear()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
 def _reset_sdk_state():
-    """Reset session store, metrics, and rate limiter between SDK tests."""
+    """Reset all mutable global state between SDK tests."""
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
+    _clear_usage()
+    _clear_usage_caches()
     yield
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
+    _clear_usage()
+    _clear_usage_caches()
 
 
 @pytest.fixture(autouse=True)

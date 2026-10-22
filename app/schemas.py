@@ -91,13 +91,16 @@ class UsageResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_key_fingerprint: str = Field(..., min_length=1, max_length=64)
-    tier: Literal["free", "pro", "team", "enterprise"]
+    tier: Literal["free", "pro", "team"]
     messages_this_month: int = Field(..., ge=0)
     tier_limit: int = Field(..., ge=0, description="0 means unlimited.")
     remaining: Optional[int] = Field(
         default=None,
         description="None when the tier is unlimited.",
     )
+    # --- Agent tracking ---
+    agents_this_month: int = Field(default=0, ge=0)
+    agent_limit: int = Field(default=5, ge=0, description="0 means unlimited.")
     reset_at: str = Field(..., min_length=1)
     enforcement_enabled: bool
 

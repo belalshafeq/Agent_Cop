@@ -55,28 +55,62 @@ def _clear_metrics() -> None:
 
 
 def _clear_rate_limiter() -> None:
+    """Clear ALL tier-based rate limiters.
+
+    The middleware now uses a dict of limiters (_limiters) keyed by tier,
+    not a single global _limiter. Clearing only _limiter (the old name)
+    would silently do nothing and rate-limit state would leak across tests.
+    """
     try:
         import app.middleware as mw
-        limiter = getattr(mw, "_limiter", None)
-        if limiter is None:
+        limiters = getattr(mw, "_limiters", None)
+        if limiters is None:
             return
-        calls = getattr(limiter, "_calls", None)
-        if calls is None:
-            return
-        calls.clear()
+        for limiter in limiters.values():
+            calls = getattr(limiter, "_calls", None)
+            if calls is not None:
+                calls.clear()
     except Exception:
         pass
 
 
 def _clear_usage() -> None:
-    """Clear the usage counter backend (in-memory variant)."""
+    """Clear BOTH the message counter and the agent identity set.
+
+    The in-memory backend tracks two dicts:
+      - _data: message counts per (resolved_key, month)
+      - _agents: agent identity sets per (resolved_key, month)
+    Both must be cleared, otherwise agent counts leak across tests
+    and the agent-limit tests will fail on the second run.
+    """
     try:
         backend = _usage_module.usage_backend
-        data = getattr(backend, "_data", None)
         lock = getattr(backend, "_lock", None)
-        if data is not None and lock is not None:
-            with lock:
+        data = getattr(backend, "_data", None)
+        agents = getattr(backend, "_agents", None)
+        if lock is None:
+            return
+        with lock:
+            if data is not None:
                 data.clear()
+            if agents is not None:
+                agents.clear()
+    except Exception:
+        pass
+
+
+def _clear_usage_caches() -> None:
+    """Clear the @lru_cache wrappers on usage.py lookups.
+
+    Without this, the first test that calls get_tier_and_limit() or
+    _resolve_usage_key() caches its result. Any subsequent test that
+    overrides settings (e.g. tier_team_limit or tier_team_agents) will
+    still see the cached value and the override appears to do nothing.
+    This is the classic lru_cache test-pollution trap.
+    """
+    try:
+        _usage_module._resolve_usage_key.cache_clear()
+        _usage_module.get_tier_and_limit.cache_clear()
     except Exception:
         pass
 
@@ -86,16 +120,18 @@ def _clear_usage() -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """Reset sessions, metrics, rate limiter, and usage before/after each test."""
+    """Reset all mutable global state before and after every test."""
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
     _clear_usage()
+    _clear_usage_caches()
     yield
     _clear_store()
     _clear_metrics()
     _clear_rate_limiter()
     _clear_usage()
+    _clear_usage_caches()
 
 
 @pytest.fixture()

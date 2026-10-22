@@ -9,10 +9,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from .config import settings
 from .db import get_db
+from .schemas import UsageResponse
+from .usage import snapshot, _resolve_usage_key, get_tier_and_limit
 from .userstore import user_store, User
 
 logger = logging.getLogger("agenttrafficcop.auth")
@@ -27,7 +29,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/auth/login")
 
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str
+    # Enforce minimum 8 chars for security, max 72 to prevent bcrypt crashes
+    password: str = Field(..., min_length=8, max_length=72)
 
 
 class Token(BaseModel):
@@ -89,6 +92,10 @@ async def register(body: UserRegister):
     # Generate their first API key
     raw_key = user_store.create_api_key(user.id, tier="free")
     
+    # CRITICAL: Clear the LRU cache so the new key is recognized immediately
+    _resolve_usage_key.cache_clear()
+    get_tier_and_limit.cache_clear()
+    
     # Create JWT
     access_token = create_access_token(data={"sub": user.email})
     
@@ -133,8 +140,51 @@ async def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     )
 
 
+@router.get("/v1/auth/usage", response_model=UsageResponse)
+async def get_dashboard_usage(current_user: Annotated[User, Depends(get_current_user)]):
+    """Fetch usage for the dashboard using JWT auth."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT fingerprint FROM api_keys WHERE user_id = ? AND revoked_at IS NULL LIMIT 1", 
+            (current_user.id,)
+        )
+        row = cursor.fetchone()
+        
+    if not row:
+        raise HTTPException(status_code=404, detail="No active API keys found.")
+        
+    snap = snapshot(row["fingerprint"])
+    return UsageResponse(**snap.to_dict())
+
+
 @router.post("/v1/auth/keys", response_model=dict)
 async def create_new_key(current_user: Annotated[User, Depends(get_current_user)]):
-    """Generate a new API key (e.g., for a new environment)."""
-    raw_key = user_store.create_api_key(current_user.id, tier="free")
+    """Generate a new API key, enforcing tier limits."""
+    tier = user_store.get_user_tier(current_user.id)
+    
+    # Enforce limits: Free = 1, Pro = 5, Team = Unlimited (999999)
+    max_keys = 1 if tier == "free" else (5 if tier == "pro" else 999999)
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM api_keys WHERE user_id = ? AND revoked_at IS NULL", 
+            (current_user.id,)
+        )
+        row = cursor.fetchone()
+        current_count = row["count"] if row else 0
+        
+    if current_count >= max_keys:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"API key limit reached for the {tier} tier ({max_keys} keys). Upgrade to generate more."
+        )
+
+    raw_key = user_store.create_api_key(current_user.id, tier=tier)
+    
+    # CRITICAL: Clear the LRU cache so the new key is recognized immediately
+    _resolve_usage_key.cache_clear()
+    get_tier_and_limit.cache_clear()
+    
     return {"api_key": raw_key, "message": "Save this key. It will not be shown again."}

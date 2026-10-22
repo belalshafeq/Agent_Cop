@@ -25,11 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 COPY requirements.txt .
+# We copy the SDK in early to leverage Docker layer caching
+COPY sdk/ ./sdk/
 
 # Install into a venv we can copy to the runtime stage.
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install -r requirements.txt
+    /opt/venv/bin/pip install -r requirements.txt && \
+    /opt/venv/bin/pip install -e ./sdk
 
 # ---------- Stage 2: runtime ----------
 FROM python:3.12-slim AS runtime
@@ -58,10 +61,11 @@ USER atc
 EXPOSE 8000
 
 # Healthcheck so compose / orchestrators can tell if we're alive.
+# CRITICAL: Use $PORT env var for Render
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request, sys; \
-        r = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); \
+        r = urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", 8000)}/health', timeout=3); \
         sys.exit(0 if r.status == 200 else 1)"
 
-# Use exec form so signals reach uvicorn directly.
-CMD ["python", "run.py"]
+# CRITICAL: Use $PORT so Render can route traffic correctly
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

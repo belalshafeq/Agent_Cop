@@ -70,6 +70,17 @@ class UserStore:
             password_hash=row["password_hash"]
         )
 
+    def get_user_tier(self, user_id: int) -> str:
+        """Fetch the tier of a user's active key."""
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tier FROM api_keys WHERE user_id = ? AND revoked_at IS NULL LIMIT 1",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+            return row["tier"] if row else "free"
+
     def create_api_key(self, user_id: int, tier: str = "free") -> str:
         """Generate a new API key, save the hash to DB, return raw key exactly once."""
         import secrets

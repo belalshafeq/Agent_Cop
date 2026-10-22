@@ -11,10 +11,12 @@ from app.config import settings
 from app.usage import (
     InMemoryUsageBackend,
     current_month_bucket,
+    get_agents_set,
     get_tier_and_limit,
     get_usage,
     is_over_limit,
     next_month_start_utc,
+    record_agents,
     record_message,
     snapshot,
 )
@@ -30,9 +32,9 @@ from tests.conftest import SECOND_API_KEY, VALID_API_KEY
 def override_settings():
     """Temporarily override frozen Settings fields.
 
-    Usage:
-        def test_x(override_settings):
-            override_settings(usage_enforcement_enabled=True, tier_team_limit=3)
+    Also clears the @lru_cache on get_tier_and_limit and _resolve_usage_key
+    so the new values take effect immediately. Without this, overrides
+    appear to have no effect because prior tests cached the values.
     """
     original: dict = {}
 
@@ -41,11 +43,23 @@ def override_settings():
             if key not in original:
                 original[key] = getattr(settings, key)
             object.__setattr__(settings, key, value)
+        from app import usage as _u
+        try:
+            _u.get_tier_and_limit.cache_clear()
+            _u._resolve_usage_key.cache_clear()
+        except Exception:
+            pass
 
     yield _override
 
     for key, value in original.items():
         object.__setattr__(settings, key, value)
+    from app import usage as _u
+    try:
+        _u.get_tier_and_limit.cache_clear()
+        _u._resolve_usage_key.cache_clear()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +128,25 @@ class TestInMemoryBackend:
 
         assert b.get("shared") == 500
 
+    def test_add_agents_returns_new_count(self):
+        b = InMemoryUsageBackend()
+        assert b.add_agents("k", {"a", "b"}) == 2
+        assert b.add_agents("k", {"b", "c"}) == 3
+        assert b.get_agents_set("k") == {"a", "b", "c"}
+
+    def test_add_agents_is_idempotent(self):
+        b = InMemoryUsageBackend()
+        b.add_agents("k", {"a", "b"})
+        b.add_agents("k", {"a", "b"})
+        assert b.add_agents("k", {"a", "b"}) == 2
+
+    def test_agents_are_isolated_per_key(self):
+        b = InMemoryUsageBackend()
+        b.add_agents("k1", {"a", "b"})
+        b.add_agents("k2", {"c"})
+        assert b.get_agents_set("k1") == {"a", "b"}
+        assert b.get_agents_set("k2") == {"c"}
+
 
 # ---------------------------------------------------------------------------
 # Module-level API
@@ -134,11 +167,49 @@ class TestModuleLevelAPI:
         d = s.to_dict()
         assert d["api_key_fingerprint"] == "fp2"
         assert d["messages_this_month"] == 2
-        assert d["tier"] in {"free", "pro", "team", "enterprise"}
+        assert d["tier"] in {"free", "pro", "team"}
         assert isinstance(d["tier_limit"], int)
         assert d["reset_at"]
         assert isinstance(d["enforcement_enabled"], bool)
         assert d["remaining"] is None or isinstance(d["remaining"], int)
+        # --- New agent fields ---
+        assert "agents_this_month" in d
+        assert "agent_limit" in d
+        assert isinstance(d["agents_this_month"], int)
+        assert isinstance(d["agent_limit"], int)
+
+    def test_snapshot_includes_agent_count(self):
+        record_agents("fp3", "coder", "reviewer")
+        s = snapshot("fp3")
+        assert s.agents_this_month == 2
+
+
+# ---------------------------------------------------------------------------
+# Agent counting (direct API)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentCounting:
+    def test_fresh_key_has_no_agents(self):
+        assert get_agents_set("brand-new-fp") == set()
+
+    def test_single_handoff_adds_two_agents(self):
+        record_agents("fp-a", "coder", "reviewer")
+        assert get_agents_set("fp-a") == {"coder", "reviewer"}
+
+    def test_reverse_handoff_deduplicates(self):
+        record_agents("fp-b", "coder", "reviewer")
+        record_agents("fp-b", "reviewer", "coder")
+        agents = get_agents_set("fp-b")
+        assert agents == {"coder", "reviewer"}
+        assert len(agents) == 2
+
+    def test_third_agent_adds_one(self):
+        record_agents("fp-c", "coder", "reviewer")
+        record_agents("fp-c", "planner", "coder")
+        agents = get_agents_set("fp-c")
+        assert agents == {"coder", "reviewer", "planner"}
+        assert len(agents) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +325,9 @@ class TestUsageEndpoint:
             "remaining",
             "reset_at",
             "enforcement_enabled",
+            # --- New agent fields ---
+            "agents_this_month",
+            "agent_limit",
         }
 
     def test_counts_increment_through_route(
@@ -301,6 +375,25 @@ class TestUsageEndpoint:
         assert u1["messages_this_month"] == 2
         assert u2["messages_this_month"] == 4
         assert u1["api_key_fingerprint"] != u2["api_key_fingerprint"]
+
+    def test_agents_tracked_through_route(
+        self, client, auth_headers, sample_message
+    ):
+        """Send handoffs from 3 distinct agents and verify agents_this_month."""
+        client.post("/v1/route", json=sample_message, headers=auth_headers)
+
+        msg2 = dict(
+            sample_message,
+            session_id="second",
+            sender="coder",
+            recipient="planner",
+            payload={"x": 2},
+        )
+        client.post("/v1/route", json=msg2, headers=auth_headers)
+
+        usage = client.get("/v1/usage", headers=auth_headers).json()
+        # coder, reviewer, planner → 3 unique agents
+        assert usage["agents_this_month"] == 3
 
     def test_bad_auth_on_usage_endpoint(self, client):
         r = client.get(

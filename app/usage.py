@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Dict, Optional, Tuple
 
 from .config import settings
@@ -48,6 +49,12 @@ class UsageBackend:
     def get(self, fingerprint: str) -> int:
         raise NotImplementedError
 
+    def add_agents(self, key: str, agents: set[str]) -> int:
+        raise NotImplementedError
+
+    def get_agents_set(self, key: str) -> set[str]:
+        raise NotImplementedError
+
 
 # ---------------------------------------------------------------------------
 # In-memory backend
@@ -61,6 +68,8 @@ class InMemoryUsageBackend(UsageBackend):
         self._lock = threading.RLock()
         # {(fingerprint, month): count}
         self._data: Dict[Tuple[str, str], int] = {}
+        # {(fingerprint, month): set of agent identities}
+        self._agents: Dict[Tuple[str, str], set[str]] = {}
 
     def increment(self, fingerprint: str, amount: int = 1) -> int:
         key = (fingerprint, current_month_bucket())
@@ -72,6 +81,19 @@ class InMemoryUsageBackend(UsageBackend):
         key = (fingerprint, current_month_bucket())
         with self._lock:
             return self._data.get(key, 0)
+
+    def add_agents(self, key: str, agents: set[str]) -> int:
+        k = (key, current_month_bucket())
+        with self._lock:
+            if k not in self._agents:
+                self._agents[k] = set()
+            self._agents[k].update(agents)
+            return len(self._agents[k])
+
+    def get_agents_set(self, key: str) -> set[str]:
+        k = (key, current_month_bucket())
+        with self._lock:
+            return set(self._agents.get(k, set()))
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +111,15 @@ class RedisUsageBackend(UsageBackend):
     def _key(self, fingerprint: str) -> str:
         return f"{self._prefix}{fingerprint}:{current_month_bucket()}"
 
+    def _agents_key(self, fingerprint: str) -> str:
+        return f"{self._prefix}agents:{fingerprint}:{current_month_bucket()}"
+
     def increment(self, fingerprint: str, amount: int = 1) -> int:
         try:
             key = self._key(fingerprint)
             new_value = int(self._redis.incrby(key, int(amount)))
+            # Keep counters for ~62 days; they'll never be read after
+            # the month rolls over anyway.
             self._redis.expire(key, 62 * 24 * 60 * 60)
             return new_value
         except Exception as e:
@@ -106,6 +133,24 @@ class RedisUsageBackend(UsageBackend):
         except Exception as e:
             logger.warning("usage_get_failed error=%s", e)
             return 0
+
+    def add_agents(self, key: str, agents: set[str]) -> int:
+        try:
+            rk = self._agents_key(key)
+            if agents:
+                self._redis.sadd(rk, *agents)
+            self._redis.expire(rk, 62 * 24 * 60 * 60)
+            return int(self._redis.scard(rk))
+        except Exception as e:
+            logger.warning("usage_add_agents_failed error=%s", e)
+            return 0
+
+    def get_agents_set(self, key: str) -> set[str]:
+        try:
+            return set(self._redis.smembers(self._agents_key(key)))
+        except Exception as e:
+            logger.warning("usage_get_agents_failed error=%s", e)
+            return set()
 
 
 # ---------------------------------------------------------------------------
@@ -144,32 +189,48 @@ usage_backend: UsageBackend = _build_backend()
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Caching Layer (Prevents SQLite Locking)
 # ---------------------------------------------------------------------------
 
 
-def record_message(fingerprint: str) -> int:
-    """Increment the caller's usage counter. Returns the new value."""
-    return usage_backend.increment(fingerprint, 1)
+@lru_cache(maxsize=10_000)
+def _resolve_usage_key(fingerprint: str) -> str:
+    """Map an API key fingerprint to a user_id for aggregated usage.
+
+    Cached in memory to prevent hitting SQLite on every single request.
+    The cache is cleared when new API keys are generated.
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id FROM api_keys WHERE fingerprint = ? AND revoked_at IS NULL",
+                (fingerprint,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return f"user_{row['user_id']}"
+    except Exception as e:
+        logger.error("resolve_usage_key_failed error=%s", e)
+
+    # Fallback for legacy .env keys or if DB fails
+    return f"key_{fingerprint}"
 
 
-def get_usage(fingerprint: str) -> int:
-    """Return the caller's usage count for the current month."""
-    return usage_backend.get(fingerprint)
-
-
+@lru_cache(maxsize=10_000)
 def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
     """Return (tier, limit) for the caller, given their fingerprint.
-    
+
     Checks the SQLite DB first. If not found, falls back to .env settings.
+    Cached in memory to prevent SQLite locking during high traffic.
     """
     # --- 1. Check the Database ---
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT tier FROM api_keys WHERE fingerprint = ? AND revoked_at IS NULL", 
-                (fingerprint,)
+                "SELECT tier FROM api_keys WHERE fingerprint = ? AND revoked_at IS NULL",
+                (fingerprint,),
             )
             row = cursor.fetchone()
             if row:
@@ -185,7 +246,6 @@ def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
         return sha256(k.encode()).hexdigest()[:8]
 
     for tier_name, key_list in (
-        ("enterprise", settings.enterprise_api_keys),
         ("team", settings.team_api_keys + settings.api_keys),
         ("pro", settings.pro_api_keys),
         ("free", settings.free_api_keys),
@@ -195,6 +255,38 @@ def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
                 return tier_name, settings.limit_for_tier(tier_name)
 
     return "free", settings.limit_for_tier("free")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def record_message(fingerprint: str) -> int:
+    """Increment the caller's usage counter. Returns the new value."""
+    resolved_key = _resolve_usage_key(fingerprint)
+    return usage_backend.increment(resolved_key, 1)
+
+
+def get_usage(fingerprint: str) -> int:
+    """Return the caller's usage count for the current month."""
+    resolved_key = _resolve_usage_key(fingerprint)
+    return usage_backend.get(resolved_key)
+
+
+def record_agents(fingerprint: str, sender: str, recipient: str) -> int:
+    """Record the unique agents seen in this handoff.
+
+    Returns the total unique agents seen this month for the calling key.
+    """
+    resolved_key = _resolve_usage_key(fingerprint)
+    return usage_backend.add_agents(resolved_key, {sender, recipient})
+
+
+def get_agents_set(fingerprint: str) -> set[str]:
+    """Return the set of unique agents seen this month for the calling key."""
+    resolved_key = _resolve_usage_key(fingerprint)
+    return usage_backend.get_agents_set(resolved_key)
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +308,8 @@ class UsageSnapshot:
     remaining: Optional[int] # None if unlimited
     reset_at: str
     enforcement_enabled: bool
+    agents_this_month: int = 0
+    agent_limit: int = 5
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -226,6 +320,8 @@ class UsageSnapshot:
             "remaining": self.remaining,
             "reset_at": self.reset_at,
             "enforcement_enabled": self.enforcement_enabled,
+            "agents_this_month": self.agents_this_month,
+            "agent_limit": self.agent_limit,
         }
 
 
@@ -234,6 +330,7 @@ def snapshot(fingerprint: str) -> UsageSnapshot:
     tier, limit = get_tier_and_limit(fingerprint)
     used = get_usage(fingerprint)
     remaining = None if limit == 0 else max(0, limit - used)
+    agents_seen = get_agents_set(fingerprint)
     return UsageSnapshot(
         api_key_fingerprint=fingerprint,
         tier=tier,
@@ -242,6 +339,8 @@ def snapshot(fingerprint: str) -> UsageSnapshot:
         remaining=remaining,
         reset_at=next_month_start_utc(),
         enforcement_enabled=settings.usage_enforcement_enabled,
+        agents_this_month=len(agents_seen),
+        agent_limit=settings.agent_limit_for_tier(tier),
     )
 
 
