@@ -5,6 +5,18 @@ All notable changes to the AgentTrafficCop SDK are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-10-23
+
+### Added
+- **Agent-Based Pricing**: The middleware now tracks unique agent identities per session (deduplicated).
+- **402 Payment Required**: Agent limit enforcement for Free, Pro, and Team tiers.
+- **Usage Analytics**: The dashboard now includes a protected agents progress bar alongside monthly messages.
+- **Cache Invalidation**: Added LRU cache clearing for API keys on generation to prevent SQLite locking.
+
+### Fixed
+- **Rate Limit Bypass**: Fixed a bug where generating a new API key bypassed the rate limit by resolving to the `user_id` instead of the key fingerprint.
+- **SQLite Locking**: Added `check_same_thread=False` and LRU caching to prevent database locks under high concurrency.
+
 ## [0.1.0] - 2026-10-13
 
 ### Added
