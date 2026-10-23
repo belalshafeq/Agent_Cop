@@ -6,6 +6,14 @@
   <title>AgentTrafficCop — Runtime circuit breaker for AI agents</title>
   <meta name="description" content="Stop your AI agents from burning money in loops. A runtime circuit breaker for multi-agent systems. Install with pip." />
   <meta name="theme-color" content="#000000" />
+  
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="AgentTrafficCop — Runtime circuit breaker for AI agents" />
+  <meta property="og:description" content="Stop your AI agents from burning money in loops. A runtime circuit breaker for multi-agent systems." />
+  <meta property="og:url" content="https://YOUR-LIVE-FRONTEND-URL.com" />
+  <!-- Add an image later if you want: <meta property="og:image" content="https://YOUR-LIVE-FRONTEND-URL.com/og-image.png" /> -->
+
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Cpath d='M30 55L45 70L70 30' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -842,7 +850,7 @@
       </div>
       <div class="code-body"><span class="kw">from</span> agenttrafficcop <span class="kw">import</span> Guard, LoopDetected
 
-guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<span class="str">"your-key"</span>)
+guard = Guard(url=<span class="str">"https://YOUR-RENDER-URL.onrender.com"</span>, api_key=<span class="str">"your-key"</span>)
 
 <span class="kw">try</span>:
     result = <span class="kw">await</span> guard.check(
@@ -875,7 +883,7 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
 
     <div class="stats reveal d2">
       <div class="stat">
-        <div class="stat-value">194</div>
+        <div class="stat-value">213</div>
         <div class="stat-label">Tests</div>
         <div class="stat-desc">Passing in CI on every commit</div>
       </div>
@@ -903,13 +911,12 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
   <div class="wrap">
     <div class="section-label reveal">04 — Pricing</div>
     <h2 class="section-title reveal d1">
-      Protect 5 agents free.<br/>
-      Scale when your swarm <em>grows.</em>
+      Free to start.<br/>
+      Scale when you <em>need to.</em>
     </h2>
     <p class="reveal d2" style="font-size: 15px; color: var(--fg-1); max-width: 520px; margin-bottom: 56px;">
-      Every plan is priced by how many unique agents you govern — because that's
-      what actually drives your risk. The middleware and SDK are open source
-      and self-hostable today.
+      The middleware and SDK are open source and self-hostable today.
+      Managed tiers are coming soon.
     </p>
 
     <div class="pricing reveal d3">
@@ -993,6 +1000,8 @@ guard = Guard(url=<span class="str">"http://localhost:8000"</span>, api_key=<spa
     <div class="meta">
       <a href="https://github.com/belalshafeq/Agent_Cop" target="_blank" rel="noopener">GitHub</a>
       <a href="https://pypi.org/project/agenttrafficcop/" target="_blank" rel="noopener">PyPI</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
       <a href="mailto:belalshafeq@gmail.com?subject=AgentTrafficCop%20%E2%80%94%20Contact">Contact</a>
     </div>
   </div>

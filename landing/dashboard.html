@@ -19,10 +19,7 @@
     .brand-mark::after { content: ''; width: 6px; height: 6px; background: var(--fg); border-radius: 50%; }
     .main-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
     
-    /* Card */
     .card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 32px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
-    
-    /* Tabs */
     .auth-tabs { display: flex; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px; margin-bottom: 24px; }
     .auth-tab { flex: 1; text-align: center; padding: 8px; font-size: 13px; font-weight: 500; color: var(--fg-1); border-radius: 6px; cursor: pointer; transition: all 0.2s; border: none; background: transparent; }
     .auth-tab:hover { color: var(--fg); }
@@ -35,7 +32,6 @@
     .form-group input:focus { border-color: var(--fg-1); }
     .form-group input.invalid { border-color: var(--error); }
     
-    /* Password Toggle */
     .toggle-password { position: absolute; right: 12px; top: 12px; cursor: pointer; color: var(--fg-2); font-size: 12px; font-weight: 500; user-select: none; transition: color 0.2s; }
     .toggle-password:hover { color: var(--fg); }
 
@@ -49,7 +45,6 @@
     .hidden { display: none !important; }
     .error-msg { color: var(--error); font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
 
-    /* Dashboard specific */
     .dashboard-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
     .dashboard-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
     .dashboard-email { color: var(--fg-1); font-size: 13px; margin-top: 4px; }
@@ -63,6 +58,11 @@
     .new-key-value { font-family: 'Geist Mono', monospace; font-size: 14px; word-break: break-all; color: var(--fg); padding-right: 60px; }
     .copy-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--accent); color: var(--bg); border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
     .copy-btn:hover { opacity: 0.8; }
+
+    /* Footer */
+    .page-footer { border-top: 1px solid var(--line); padding: 24px 32px; text-align: center; font-size: 12px; color: var(--fg-2); }
+    .page-footer a { margin: 0 8px; transition: color 0.15s; }
+    .page-footer a:hover { color: var(--fg); }
   </style>
 </head>
 <body>
@@ -75,10 +75,7 @@
   </header>
 
   <div class="main-container">
-    <!-- AUTH SECTION -->
     <div id="auth-section" class="card">
-      
-      <!-- TABS -->
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Sign In</button>
         <button class="auth-tab" id="tab-register" onclick="switchAuthMode('register')">Create Account</button>
@@ -110,7 +107,6 @@
       <p id="auth-error" class="error-msg"></p>
     </div>
 
-    <!-- DASHBOARD SECTION -->
     <div id="dashboard-section" class="card hidden">
       <div class="dashboard-header">
         <div>
@@ -128,7 +124,6 @@
         </div>
       </div>
 
-      <!-- Protected Agents Box -->
       <div class="key-box" style="margin-bottom: 24px;">
         <div class="tier-label">Protected Agents</div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
@@ -140,7 +135,6 @@
         </div>
       </div>
 
-      <!-- Monthly Messages Box -->
       <div class="key-box" style="margin-bottom: 24px;">
         <div class="tier-label">Monthly Messages</div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
@@ -176,25 +170,30 @@
     </div>
   </div>
 
+  <!-- NEW FOOTER -->
+  <footer class="page-footer">
+    <a href="index.html">Home</a>
+    <a href="privacy.html">Privacy Policy</a>
+    <a href="terms.html">Terms of Service</a>
+  </footer>
+
   <script>
-    // --- Smart API Base Detection ---
     const hostname = window.location.hostname;
     let API_BASE;
 
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       API_BASE = 'http://localhost:8000';
     } else if (hostname.includes('github.dev')) {
-      API_BASE = 'https://octwz-20-192-21-51.run.pinggy-free.link'; 
+      const backendHostname = hostname.replace('-3000', '-8000').replace('-3001', '-8000');
+      API_BASE = `https://${backendHostname}`;
     } else {
       API_BASE = 'https://YOUR-RENDER-URL-HERE.onrender.com'; // REPLACE ON DEPLOY
     }
 
-    // --- Wake up Render ---
     fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => console.log("Waking server..."));
 
     let currentMode = 'login';
 
-    // --- UI Helpers ---
     function togglePassword(inputId, el) {
       const input = document.getElementById(inputId);
       input.type = input.type === 'password' ? 'text' : 'password';
@@ -217,7 +216,6 @@
       document.getElementById('confirm-password').required = mode === 'register';
     }
 
-    // Clear errors when typing
     document.getElementById('email').addEventListener('input', () => {
         document.getElementById('auth-error').textContent = '';
         document.getElementById('email').classList.remove('invalid');
@@ -226,7 +224,6 @@
         document.getElementById('auth-error').textContent = '';
     });
 
-    // --- Form Submission ---
     document.getElementById('auth-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('email').value;
@@ -236,7 +233,6 @@
       const errorEl = document.getElementById('auth-error');
       const emailInput = document.getElementById('email');
       
-      // Frontend Email Validation (Regex)
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         errorEl.textContent = "Please enter a valid email address.";
@@ -244,7 +240,6 @@
         return;
       }
 
-      // Password Match Validation
       if (currentMode === 'register' && password !== confirmPassword) {
         errorEl.textContent = "Passwords do not match.";
         return;
@@ -256,12 +251,10 @@
 
       try {
         let res;
-        
         if (currentMode === 'login') {
           const formData = new URLSearchParams();
           formData.append('username', email);
           formData.append('password', password);
-          
           res = await fetch(`${API_BASE}/v1/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -279,7 +272,6 @@
         
         if (!res.ok) {
           let errMsg = 'Authentication failed';
-          
           if (data.error === 'SCHEMA_VALIDATION_FAILED' && data.diagnostics?.validation_errors) {
              errMsg = data.diagnostics.validation_errors[0].msg;
              if (errMsg.includes('valid email')) { 
@@ -293,7 +285,6 @@
           } else if (data.message) { 
              errMsg = data.message; 
           }
-          
           throw new Error(errMsg);
         }
 
@@ -313,7 +304,6 @@
       }
     });
 
-    // --- Dashboard Logic ---
     async function showDashboard() {
       const token = localStorage.getItem('atc_token');
       if (!token) return;
@@ -322,7 +312,6 @@
       document.getElementById('dashboard-section').classList.remove('hidden');
       
       try {
-        // 1. Fetch Profile
         const res = await fetch(`${API_BASE}/v1/auth/me`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -341,7 +330,6 @@
           document.getElementById('upgrade-btn').classList.add('hidden');
         }
 
-        // 2. Fetch Usage (messages + agents)
         const usageRes = await fetch(`${API_BASE}/v1/auth/usage`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -349,7 +337,6 @@
         if (usageRes.ok) {
           const usage = await usageRes.json();
 
-          // --- Messages progress ---
           document.getElementById('usage-count').textContent = usage.messages_this_month.toLocaleString();
           document.getElementById('usage-limit').textContent = usage.tier_limit.toLocaleString();
           const msgPercent = usage.tier_limit > 0 ? Math.min((usage.messages_this_month / usage.tier_limit) * 100, 100) : 0;
@@ -359,7 +346,6 @@
           else if (msgPercent > 75) msgBar.style.background = '#fcd34d';
           else msgBar.style.background = 'var(--accent)';
 
-          // --- Agents progress ---
           document.getElementById('agents-count').textContent = (usage.agents_this_month || 0).toLocaleString();
           document.getElementById('agents-limit').textContent = (usage.agent_limit || 5).toLocaleString();
           const agentPercent = usage.agent_limit > 0 ? Math.min(((usage.agents_this_month || 0) / usage.agent_limit) * 100, 100) : 0;
@@ -369,7 +355,6 @@
           else if (agentPercent > 75) agentBar.style.background = '#fcd34d';
           else agentBar.style.background = 'var(--accent)';
 
-          // --- Reset date ---
           const resetDate = new Date(usage.reset_at);
           document.getElementById('usage-reset').textContent = resetDate.toLocaleDateString();
         }
