@@ -47,14 +47,6 @@ def _load_env() -> None:
 _load_env()
 
 ATC_URL = os.getenv("ATC_URL", "http://localhost:8000")
-ATC_KEY = os.getenv("ATC_KEY") or _first_api_key()
-
-SESSION_ID = "demo-loop"
-
-# The "without protection" run is capped at this many round-trips so the
-# demo doesn't actually hang forever. Real life has no cap.
-BEFORE_MAX_ROUNDS = 12
-
 
 def _first_api_key() -> str:
     """Pull the first key out of ATC_API_KEYS in the environment."""
@@ -68,6 +60,13 @@ def _first_api_key() -> str:
         sys.exit(2)
     return raw.split(",")[0].strip()
 
+ATC_KEY = os.getenv("ATC_KEY") or _first_api_key()
+
+SESSION_ID = "demo-loop"
+
+# The "without protection" run is capped at this many round-trips so the
+# demo doesn't actually hang forever. Real life has no cap.
+BEFORE_MAX_ROUNDS = 12
 
 # ---------------------------------------------------------------------------
 # Pretty printing
