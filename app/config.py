@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
+
+logger = logging.getLogger("agenttrafficcop.config")
 
 try:
     from dotenv import load_dotenv
@@ -15,6 +18,28 @@ try:
         load_dotenv(dotenv_path=_ENV_PATH, override=False)
 except ImportError:  # pragma: no cover
     pass
+
+
+# FIX (C3): explicit list of environments treated as non-production.
+# Anything NOT in this set is treated as production — fail closed. The
+# old check matched {"production", "prod"} only, so `ATC_ENV=staging`
+# would silently bypass the JWT safety check and ship the placeholder
+# secret, making every JWT forgeable.
+_DEV_ENVS = frozenset({"development", "dev", "test", "testing", "local"})
+
+# FIX (#5): widen the list of known-bad JWT secrets. The old check only
+# matched the literal "super-secret-change-me-in-prod". Anyone "fixing"
+# the placeholder by changing it to another guessable value shipped
+# prod with a weak signing key.
+_INSECURE_JWT_SECRETS = frozenset({
+    "",
+    "super-secret-change-me-in-prod",
+    "CHANGE-ME-GENERATE-WITH-secrets-token_urlsafe-32",
+    "change-me",
+    "changeme",
+    "your-secret-here",
+    "secret",
+})
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
@@ -52,7 +77,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_api_keys() -> Tuple[str, ...]:
-    """Legacy ATC_API_KEYS — treated as `team` tier."""
     raw = os.getenv("ATC_API_KEYS", "")
     if not raw:
         return ()
@@ -60,7 +84,6 @@ def _env_api_keys() -> Tuple[str, ...]:
 
 
 def _env_key_list(name: str) -> Tuple[str, ...]:
-    """Comma-separated key list for tier-specific assignment."""
     raw = os.getenv(name, "")
     if not raw:
         return ()
@@ -81,19 +104,34 @@ class Settings:
         default_factory=lambda: _env_str("ATC_LOG_LEVEL", "INFO").upper()
     )
 
-    # --- Security (legacy list — treated as team tier) ---
+    # --- Security ---
     api_keys: Tuple[str, ...] = field(default_factory=_env_api_keys)
-    # Optional comma-separated list of additional CORS origins.
     cors_origins: Optional[str] = field(
         default_factory=lambda: _env_optional_str("ATC_CORS_ORIGINS")
     )
 
+    # FIX (C5): only trust X-Forwarded-For when explicitly enabled.
+    # Default is False because an attacker with a direct connection can
+    # spoof the header and bypass rate limiting.
+    trust_proxy: bool = field(
+        default_factory=lambda: _env_bool("ATC_TRUST_PROXY", False)
+    )
+
+    # FIX (M1): admin API keys — required to access /v1/admin/* and
+    # /v1/sessions/*. If empty, falls back to allowing any `team`-tier
+    # key with a warning at startup.
+    admin_api_keys: Tuple[str, ...] = field(
+        default_factory=lambda: _env_key_list("ATC_ADMIN_API_KEYS")
+    )
+
     # --- Auth / JWT ---
     jwt_secret_key: str = field(
-        default_factory=lambda: _env_str("ATC_JWT_SECRET", "super-secret-change-me-in-prod")
+        default_factory=lambda: _env_str(
+            "ATC_JWT_SECRET", "super-secret-change-me-in-prod"
+        )
     )
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
+    jwt_expire_minutes: int = 60 * 24 * 7
 
     # --- Lemon Squeezy Billing ---
     lemonsqueezy_checkout_url: Optional[str] = field(
@@ -109,9 +147,6 @@ class Settings:
     )
 
     # --- Tier assignments ---
-    # Any key listed in ATC_API_KEYS is treated as `team`.
-    # Override per key by listing it in the appropriate *_API_KEYS var.
-    # A key listed in multiple tiers resolves to the most permissive tier.
     free_api_keys: Tuple[str, ...] = field(
         default_factory=lambda: _env_key_list("ATC_FREE_API_KEYS")
     )
@@ -122,8 +157,7 @@ class Settings:
         default_factory=lambda: _env_key_list("ATC_TEAM_API_KEYS")
     )
 
-    # --- Tier message limits (per calendar month) ---
-    # 0 = unlimited
+    # --- Tier message limits (per calendar month; 0 = unlimited) ---
     tier_free_limit: int = field(
         default_factory=lambda: _env_int("ATC_TIER_FREE_LIMIT", 10_000, minimum=0)
     )
@@ -134,9 +168,7 @@ class Settings:
         default_factory=lambda: _env_int("ATC_TIER_TEAM_LIMIT", 2_000_000, minimum=0)
     )
 
-    # --- Tier agent limits (max unique agents per month) ---
-    # 0 = unlimited. An "agent" is a unique sender/recipient identity
-    # that appears in a handoff routed through the cop.
+    # --- Tier agent limits ---
     tier_free_agents: int = field(
         default_factory=lambda: _env_int("ATC_TIER_FREE_AGENTS", 5, minimum=0)
     )
@@ -147,7 +179,7 @@ class Settings:
         default_factory=lambda: _env_int("ATC_TIER_TEAM_AGENTS", 100, minimum=0)
     )
 
-    # --- Tier Rate Limits (Requests per minute) ---
+    # --- Tier rate limits (requests/minute) ---
     tier_free_rate_limit: int = field(
         default_factory=lambda: _env_int("ATC_TIER_FREE_RATE_LIMIT", 60, minimum=1)
     )
@@ -159,12 +191,9 @@ class Settings:
     )
 
     # --- Usage metering ---
-    # If true, requests are rejected when a key exceeds its tier limit.
-    # If false, metering is track-only (useful for testing).
     usage_enforcement_enabled: bool = field(
         default_factory=lambda: _env_bool("ATC_USAGE_ENFORCEMENT_ENABLED", True)
     )
-    # Redis key prefix for usage counters (kept separate from session prefix).
     usage_key_prefix: str = field(
         default_factory=lambda: _env_str("ATC_USAGE_KEY_PREFIX", "atc:usage:")
     )
@@ -231,7 +260,8 @@ class Settings:
 
     @property
     def is_production(self) -> bool:
-        return self.environment.lower() in {"production", "prod"}
+        # FIX (C3): fail closed. Any env not in _DEV_ENVS is production.
+        return self.environment.lower() not in _DEV_ENVS
 
     @property
     def auth_enabled(self) -> bool:
@@ -250,31 +280,18 @@ class Settings:
         return self.session_ttl_seconds > 0
 
     def _all_tier_keys(self) -> Tuple[str, ...]:
-        return (
-            self.free_api_keys
-            + self.pro_api_keys
-            + self.team_api_keys
-        )
+        return self.free_api_keys + self.pro_api_keys + self.team_api_keys
 
     def tier_for_key(self, key: str) -> str:
-        """Return the tier name for a given raw API key.
-
-        Precedence (most permissive wins):
-            team > pro > free
-        Legacy ATC_API_KEYS default to `team`.
-        """
         if key in self.team_api_keys or key in self.api_keys:
             return "team"
         if key in self.pro_api_keys:
             return "pro"
         if key in self.free_api_keys:
             return "free"
-        # Unknown key — treat as free (auth will have already rejected it
-        # in practice; this is a defensive default).
         return "free"
 
     def limit_for_tier(self, tier: str) -> int:
-        """Return the message-per-month limit for a tier (0 = unlimited)."""
         return {
             "free": self.tier_free_limit,
             "pro": self.tier_pro_limit,
@@ -282,7 +299,6 @@ class Settings:
         }.get(tier, self.tier_free_limit)
 
     def agent_limit_for_tier(self, tier: str) -> int:
-        """Return the unique-agents-per-month limit for a tier (0 = unlimited)."""
         return {
             "free": self.tier_free_agents,
             "pro": self.tier_pro_agents,
@@ -290,7 +306,6 @@ class Settings:
         }.get(tier, self.tier_free_agents)
 
     def rate_limit_for_tier(self, tier: str) -> int:
-        """Return the requests-per-minute limit for a tier."""
         return {
             "free": self.tier_free_rate_limit,
             "pro": self.tier_pro_rate_limit,
@@ -300,9 +315,29 @@ class Settings:
 
 settings = Settings()
 
-# --- Production Safety Checks ---
-if settings.is_production and settings.jwt_secret_key == "super-secret-change-me-in-prod":
-    raise RuntimeError(
-        "FATAL: You are running in production but haven't set ATC_JWT_SECRET. "
-        "This is a massive security risk. Set the environment variable."
+
+# --- Production safety checks ---
+if settings.is_production:
+    if settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
+        raise RuntimeError(
+            "FATAL: ATC_ENV indicates production "
+            f"(ATC_ENV={settings.environment!r}) but ATC_JWT_SECRET is "
+            "a known placeholder. Generate a real secret and set it:\n"
+            "    python -c \"import secrets; print(secrets.token_urlsafe(32))\"\n"
+            "Then set ATC_JWT_SECRET to the output and restart."
+        )
+elif settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
+    logger.warning(
+        "insecure_jwt_secret env=%s — set ATC_JWT_SECRET before "
+        "deploying to production",
+        settings.environment,
+    )
+
+# FIX (M1): warn if admin API keys aren't configured. Admin endpoints
+# will fall back to team-tier auth, which is less strict than a dedicated
+# list but at least prevents free-tier users from accessing them.
+if not settings.admin_api_keys and settings.auth_enabled:
+    logger.warning(
+        "admin_api_keys_not_configured — admin endpoints will accept any "
+        "team-tier key. Set ATC_ADMIN_API_KEYS to lock them down."
     )

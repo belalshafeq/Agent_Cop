@@ -46,7 +46,12 @@ def guarded_node(
     guard: Guard,
     sender: str,
     recipient: str,
-    session_id: ValueOrExtractor = "session_id",
+    # FIX (C2): `session_id` is now REQUIRED. The old default was the
+    # literal string "session_id", which meant every node that forgot to
+    # pass one shared a global session called "session_id". Two unrelated
+    # users' loops would collide in the same state. Now it fails loudly
+    # with a clear error if omitted.
+    session_id: Optional[ValueOrExtractor] = None,
     payload: Optional[ValueOrExtractor] = None,
     intent: str = "handoff",
     metadata: Optional[ValueOrExtractor] = None,
@@ -54,16 +59,17 @@ def guarded_node(
 ) -> NodeFn:
     if not callable(node_fn):
         raise TypeError("node_fn must be callable")
+    if session_id is None:
+        raise ValueError(
+            "guarded_node: session_id is required. Pass a string or an "
+            "extractor callable, e.g. session_id=lambda s: s['run_id']. "
+            "The old default ('session_id') shared one global session "
+            "across all callers, so it's now a hard error."
+        )
 
     is_async = inspect.iscoroutinefunction(node_fn)
 
     async def _check(state: StateT) -> bool:
-        """Return True if the node should run, False if it should be skipped.
-
-        - With raise_on_trip=True, a trip raises out of this function.
-        - With raise_on_trip=False, a trip returns False and the caller
-          must skip the underlying node.
-        """
         sid = _resolve(session_id, state, name="session_id")
         if payload is None:
             pld = _default_payload(state)
@@ -116,7 +122,9 @@ def guarded_node(
             return await node_fn(state)
 
         _wrapped_async.__name__ = getattr(node_fn, "__name__", "guarded_node")
-        _wrapped_async.__doc__ = node_fn.__doc__
+        # FIX (L8): `or ""` avoids setting __doc__ to None, which some
+        # tooling and introspection treats as missing.
+        _wrapped_async.__doc__ = node_fn.__doc__ or ""
         return _wrapped_async
 
     def _wrapped_sync(state: StateT) -> Any:
@@ -125,9 +133,16 @@ def guarded_node(
         except RuntimeError:
             should_run = asyncio.run(_check(state))
         else:
+            # FIX (#6): old message recommended `raise_on_trip=False`,
+            # which CANNOT help — we're raising before the guard check
+            # even runs. Give the only two real fixes.
             raise RuntimeError(
-                "guarded_node: sync node called inside a running event loop. "
-                "Either make your node async, or use raise_on_trip=False. "
+                "guarded_node: a sync node was called from inside a "
+                "running event loop. `raise_on_trip=False` does NOT fix "
+                "this — the guard check never runs. To resolve:\n"
+                "  (a) make your node async (recommended), or\n"
+                "  (b) run the graph from a sync context (no active "
+                "event loop on the caller stack).\n"
                 "AgentTrafficCop's Guard is async-only by design."
             )
         if not should_run:
@@ -135,5 +150,5 @@ def guarded_node(
         return node_fn(state)
 
     _wrapped_sync.__name__ = getattr(node_fn, "__name__", "guarded_node")
-    _wrapped_sync.__doc__ = node_fn.__doc__
+    _wrapped_sync.__doc__ = node_fn.__doc__ or ""
     return _wrapped_sync

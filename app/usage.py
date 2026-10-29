@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Dict, Optional, Tuple
@@ -14,6 +15,10 @@ from .db import get_db
 
 logger = logging.getLogger("agenttrafficcop.usage")
 
+# FIX (H3): prune stale month buckets only when the dict grows past this.
+# Cheap enough to check per-write; avoids unbounded growth over months.
+_PRUNE_THRESHOLD = 100_000
+
 
 # ---------------------------------------------------------------------------
 # Month bucket helpers
@@ -21,13 +26,11 @@ logger = logging.getLogger("agenttrafficcop.usage")
 
 
 def current_month_bucket() -> str:
-    """Return the current year-month as a stable string, e.g. `2026-10`."""
     now = datetime.now(timezone.utc)
     return f"{now.year:04d}-{now.month:02d}"
 
 
 def next_month_start_utc() -> str:
-    """Return the ISO-8601 UTC timestamp of the next month's first moment."""
     now = datetime.now(timezone.utc)
     year = now.year + (1 if now.month == 12 else 0)
     month = 1 if now.month == 12 else now.month + 1
@@ -41,8 +44,6 @@ def next_month_start_utc() -> str:
 
 
 class UsageBackend:
-    """Abstract usage counter backend."""
-
     def increment(self, fingerprint: str, amount: int = 1) -> int:
         raise NotImplementedError
 
@@ -53,6 +54,15 @@ class UsageBackend:
         raise NotImplementedError
 
     def get_agents_set(self, key: str) -> set[str]:
+        raise NotImplementedError
+
+    # FIX (C8): atomic check-and-add. Returns (allowed, newly_added_agents).
+    # The old code did read → check → later → write, which meant two
+    # concurrent requests could both pass the limit check and both record,
+    # blowing past the tier's agent cap.
+    def check_and_add_agents(
+        self, key: str, agents: set[str], limit: int,
+    ) -> Tuple[bool, set[str]]:
         raise NotImplementedError
 
 
@@ -66,15 +76,26 @@ class InMemoryUsageBackend(UsageBackend):
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        # {(fingerprint, month): count}
         self._data: Dict[Tuple[str, str], int] = {}
-        # {(fingerprint, month): set of agent identities}
         self._agents: Dict[Tuple[str, str], set[str]] = {}
 
+    def _maybe_prune(self, current_month: str) -> None:
+        """Drop entries from prior months. Caller must hold the lock."""
+        if len(self._data) > _PRUNE_THRESHOLD:
+            stale = [k for k in self._data if k[1] < current_month]
+            for k in stale:
+                del self._data[k]
+        if len(self._agents) > _PRUNE_THRESHOLD:
+            stale = [k for k in self._agents if k[1] < current_month]
+            for k in stale:
+                del self._agents[k]
+
     def increment(self, fingerprint: str, amount: int = 1) -> int:
-        key = (fingerprint, current_month_bucket())
+        month = current_month_bucket()
+        key = (fingerprint, month)
         with self._lock:
             self._data[key] = self._data.get(key, 0) + int(amount)
+            self._maybe_prune(month)
             return self._data[key]
 
     def get(self, fingerprint: str) -> int:
@@ -83,17 +104,33 @@ class InMemoryUsageBackend(UsageBackend):
             return self._data.get(key, 0)
 
     def add_agents(self, key: str, agents: set[str]) -> int:
-        k = (key, current_month_bucket())
+        month = current_month_bucket()
+        k = (key, month)
         with self._lock:
             if k not in self._agents:
                 self._agents[k] = set()
             self._agents[k].update(agents)
+            self._maybe_prune(month)
             return len(self._agents[k])
 
     def get_agents_set(self, key: str) -> set[str]:
         k = (key, current_month_bucket())
         with self._lock:
             return set(self._agents.get(k, set()))
+
+    def check_and_add_agents(
+        self, key: str, agents: set[str], limit: int,
+    ) -> Tuple[bool, set[str]]:
+        month = current_month_bucket()
+        k = (key, month)
+        with self._lock:
+            current = self._agents.get(k, set())
+            newly_added = agents - current
+            if limit > 0 and len(current) + len(newly_added) > limit:
+                return False, newly_added
+            self._agents[k] = current | agents
+            self._maybe_prune(month)
+            return True, newly_added
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +155,6 @@ class RedisUsageBackend(UsageBackend):
         try:
             key = self._key(fingerprint)
             new_value = int(self._redis.incrby(key, int(amount)))
-            # Keep counters for ~62 days; they'll never be read after
-            # the month rolls over anyway.
             self._redis.expire(key, 62 * 24 * 60 * 60)
             return new_value
         except Exception as e:
@@ -152,6 +187,45 @@ class RedisUsageBackend(UsageBackend):
             logger.warning("usage_get_agents_failed error=%s", e)
             return set()
 
+    # FIX (C8): atomic check-and-add via Lua. Runs server-side on Redis,
+    # so concurrent requests are serialized — no TOCTOU window.
+    _CHECK_AND_ADD_LUA = """
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local current = redis.call('SCARD', key)
+    local new_count = 0
+    for i = 2, #ARGV do
+        if redis.call('SISMEMBER', key, ARGV[i]) == 0 then
+            new_count = new_count + 1
+        end
+    end
+    if limit > 0 and (current + new_count) > limit then
+        return {0, current}
+    end
+    for i = 2, #ARGV do
+        redis.call('SADD', key, ARGV[i])
+    end
+    redis.call('EXPIRE', key, 5356800)  -- 62 days
+    return {1, current + new_count}
+    """
+
+    def check_and_add_agents(
+        self, key: str, agents: set[str], limit: int,
+    ) -> Tuple[bool, set[str]]:
+        if not agents:
+            return True, set()
+        try:
+            args = [str(limit), *sorted(agents)]
+            result = self._redis.eval(
+                self._CHECK_AND_ADD_LUA, 1, self._agents_key(key), *args,
+            )
+            allowed = bool(int(result[0]))
+            return allowed, agents if allowed else set()
+        except Exception as e:
+            logger.warning("usage_check_and_add_agents_failed error=%s", e)
+            # Fail open — a Redis hiccup shouldn't reject real customers.
+            return True, agents
+
 
 # ---------------------------------------------------------------------------
 # Module singleton
@@ -159,7 +233,6 @@ class RedisUsageBackend(UsageBackend):
 
 
 def _build_backend() -> UsageBackend:
-    """Choose a backend based on configuration."""
     if settings.redis_url:
         try:
             import redis
@@ -178,8 +251,7 @@ def _build_backend() -> UsageBackend:
             return RedisUsageBackend(client, settings.usage_key_prefix)
         except Exception as e:
             logger.warning(
-                "usage_backend_redis_failed error=%s falling_back=in_memory",
-                e,
+                "usage_backend_redis_failed error=%s falling_back=in_memory", e,
             )
     logger.info("usage_backend_selected backend=in_memory")
     return InMemoryUsageBackend()
@@ -189,17 +261,12 @@ usage_backend: UsageBackend = _build_backend()
 
 
 # ---------------------------------------------------------------------------
-# Caching Layer (Prevents SQLite Locking)
+# Caching layer
 # ---------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=10_000)
 def _resolve_usage_key(fingerprint: str) -> str:
-    """Map an API key fingerprint to a user_id for aggregated usage.
-
-    Cached in memory to prevent hitting SQLite on every single request.
-    The cache is cleared when new API keys are generated.
-    """
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -212,19 +279,11 @@ def _resolve_usage_key(fingerprint: str) -> str:
                 return f"user_{row['user_id']}"
     except Exception as e:
         logger.error("resolve_usage_key_failed error=%s", e)
-
-    # Fallback for legacy .env keys or if DB fails
     return f"key_{fingerprint}"
 
 
 @lru_cache(maxsize=10_000)
 def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
-    """Return (tier, limit) for the caller, given their fingerprint.
-
-    Checks the SQLite DB first. If not found, falls back to .env settings.
-    Cached in memory to prevent SQLite locking during high traffic.
-    """
-    # --- 1. Check the Database ---
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -239,7 +298,6 @@ def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
     except Exception as e:
         logger.error("db_tier_check_failed error=%s", e)
 
-    # --- 2. Fallback to .env (Legacy/Admin Keys) ---
     from hashlib import sha256
 
     def _fp(k: str) -> str:
@@ -263,30 +321,33 @@ def get_tier_and_limit(fingerprint: str) -> Tuple[str, int]:
 
 
 def record_message(fingerprint: str) -> int:
-    """Increment the caller's usage counter. Returns the new value."""
     resolved_key = _resolve_usage_key(fingerprint)
     return usage_backend.increment(resolved_key, 1)
 
 
 def get_usage(fingerprint: str) -> int:
-    """Return the caller's usage count for the current month."""
     resolved_key = _resolve_usage_key(fingerprint)
     return usage_backend.get(resolved_key)
 
 
 def record_agents(fingerprint: str, sender: str, recipient: str) -> int:
-    """Record the unique agents seen in this handoff.
-
-    Returns the total unique agents seen this month for the calling key.
-    """
     resolved_key = _resolve_usage_key(fingerprint)
     return usage_backend.add_agents(resolved_key, {sender, recipient})
 
 
 def get_agents_set(fingerprint: str) -> set[str]:
-    """Return the set of unique agents seen this month for the calling key."""
     resolved_key = _resolve_usage_key(fingerprint)
     return usage_backend.get_agents_set(resolved_key)
+
+
+# FIX (C8): the new atomic entry point used by routes.py. Checks the limit
+# and reserves the agents in one backend call so concurrent requests can't
+# both pass the check and both add.
+def check_and_add_agents_atomic(
+    fingerprint: str, agents: set[str], limit: int,
+) -> Tuple[bool, set[str]]:
+    resolved_key = _resolve_usage_key(fingerprint)
+    return usage_backend.check_and_add_agents(resolved_key, agents, limit)
 
 
 # ---------------------------------------------------------------------------
@@ -294,18 +355,13 @@ def get_agents_set(fingerprint: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-from dataclasses import dataclass
-
-
 @dataclass(frozen=True)
 class UsageSnapshot:
-    """Everything a caller needs to know about their usage."""
-
     api_key_fingerprint: str
     tier: str
     messages_this_month: int
-    tier_limit: int          # 0 = unlimited
-    remaining: Optional[int] # None if unlimited
+    tier_limit: int
+    remaining: Optional[int]
     reset_at: str
     enforcement_enabled: bool
     agents_this_month: int = 0
@@ -326,7 +382,6 @@ class UsageSnapshot:
 
 
 def snapshot(fingerprint: str) -> UsageSnapshot:
-    """Build a UsageSnapshot for the given fingerprint."""
     tier, limit = get_tier_and_limit(fingerprint)
     used = get_usage(fingerprint)
     remaining = None if limit == 0 else max(0, limit - used)
@@ -345,7 +400,6 @@ def snapshot(fingerprint: str) -> UsageSnapshot:
 
 
 def is_over_limit(fingerprint: str) -> Tuple[bool, str, int, int]:
-    """Check whether the caller has exceeded their tier limit."""
     if not settings.usage_enforcement_enabled:
         tier, limit = get_tier_and_limit(fingerprint)
         return False, tier, get_usage(fingerprint), limit

@@ -5,21 +5,31 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+# FIX: Sentry is optional. If the package is removed or fails to import,
+# the app must still boot. The original had a bare `import sentry_sdk`,
+# which meant `pip uninstall sentry-sdk` broke startup entirely.
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    _SENTRY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    sentry_sdk = None  # type: ignore[assignment]
+    FastApiIntegration = None  # type: ignore[assignment]
+    _SENTRY_AVAILABLE = False
 
 from . import __version__
 from .audit import audit
+from .auth import router as auth_router
+from .billing import router as billing_router
 from .config import settings
 from .exceptions import register_exception_handlers
 from .logging_config import configure_logging
 from .middleware import install_middleware
 from .routes import router
-from .auth import router as auth_router
-from .billing import router as billing_router
 
 configure_logging()
 logger = logging.getLogger("agenttrafficcop.main")
@@ -48,9 +58,14 @@ def _custom_openapi(app: FastAPI):
     return schema
 
 
-def create_app() -> FastAPI:
-    # --- Sentry Initialization (Only if DSN is provided) ---
-    if settings.sentry_dsn:
+def _init_sentry() -> None:
+    """Initialize Sentry if configured AND available. Never raises."""
+    if not settings.sentry_dsn:
+        return
+    if not _SENTRY_AVAILABLE:
+        logger.warning("sentry_dsn_set_but_sdk_missing")
+        return
+    try:
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
             integrations=[FastApiIntegration()],
@@ -58,6 +73,13 @@ def create_app() -> FastAPI:
             environment=settings.environment,
         )
         logger.info("sentry_initialized")
+    except Exception as e:
+        # FIX: bad DSN / network error used to take down startup.
+        logger.warning("sentry_init_failed error=%s", e)
+
+
+def create_app() -> FastAPI:
+    _init_sentry()
 
     docs_enabled = not settings.is_production
 
@@ -98,9 +120,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ---------------------------------------------------------------------
-    # CORS
-    # ---------------------------------------------------------------------
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:8000",
@@ -110,7 +129,6 @@ def create_app() -> FastAPI:
         "https://agenttrafficcop.com",
         "https://www.agenttrafficcop.com",
     ]
-    # Add anything from the environment.
     extra = [
         o.strip()
         for o in (settings.cors_origins or "").split(",")
@@ -121,7 +139,6 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-        # This regex allows ANY GitHub Codespaces URL (for dev) and Cloudflare Pages previews
         allow_origin_regex=r"https://.*\.(github\.dev|pages\.dev)",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],

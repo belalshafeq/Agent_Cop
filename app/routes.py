@@ -27,15 +27,14 @@ from .schemas import (
     SessionSummary,
     UsageResponse,
 )
-from .security import verify_api_key
+from .security import _fingerprint, verify_api_key
 from .state import session_store
 from .state_backends import SessionSnapshot
 from .usage import (
+    check_and_add_agents_atomic,
     get_agents_set,
     get_tier_and_limit,
-    get_usage,
     is_over_limit,
-    record_agents,
     record_message,
     snapshot,
 )
@@ -43,6 +42,45 @@ from .usage import (
 logger = logging.getLogger("agenttrafficcop.routes")
 
 router = APIRouter()
+
+
+# FIX (M1): admin authorization helper.
+# If ATC_ADMIN_API_KEYS is set, only those keys can hit admin endpoints.
+# If empty, we fall back to requiring the `team` tier (with the startup
+# warning emitted in config.py) so existing deployments don't break.
+def _require_admin(key_fingerprint: str) -> None:
+    admin_fps = {_fingerprint(k) for k in settings.admin_api_keys}
+    if admin_fps:
+        if key_fingerprint not in admin_fps:
+            logger.warning(
+                "admin_access_denied fingerprint=%s path=admin",
+                key_fingerprint,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "ADMIN_REQUIRED",
+                    "message": (
+                        "This endpoint requires an admin API key. "
+                        "Configure one via ATC_ADMIN_API_KEYS."
+                    ),
+                },
+            )
+        return
+
+    # Fallback: allow team-tier keys.
+    tier, _ = get_tier_and_limit(key_fingerprint)
+    if tier != "team":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "ADMIN_REQUIRED",
+                "message": (
+                    "This endpoint requires an admin-tier key. "
+                    "Configure ATC_ADMIN_API_KEYS or use a team-tier key."
+                ),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -69,39 +107,10 @@ async def route_message(
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> RouteApproval:
     """Governance checkpoint for a single agent-to-agent handoff."""
-    # 1. Per-minute rate limit (Tier-based).
+    # 1. Per-minute rate limit.
     await check_rate_limit(request, key_fingerprint)
 
-    # 2. Agent limit check — enforced BEFORE message counting so the user
-    #    sees a clear "upgrade to protect more agents" 402 instead of a
-    #    generic 429.
-    tier, _ = get_tier_and_limit(key_fingerprint)
-    agent_limit = settings.agent_limit_for_tier(tier)
-    if agent_limit > 0:
-        current_agents = get_agents_set(key_fingerprint)
-        new_agents = {message.sender, message.recipient} - current_agents
-        if len(current_agents) + len(new_agents) > agent_limit:
-            logger.warning(
-                "agent_limit_exceeded tier=%s current=%d limit=%d key=%s",
-                tier,
-                len(current_agents),
-                agent_limit,
-                key_fingerprint,
-            )
-            raise AgentLimitExceeded(
-                message=(
-                    f"Adding this handoff would introduce agents beyond your "
-                    f"{tier} tier limit of {agent_limit} unique agents per month. "
-                    f"Upgrade to protect more agents."
-                ),
-                tier=tier,
-                current_agents=len(current_agents),
-                limit=agent_limit,
-                attempted_new=sorted(new_agents),
-                session_id=message.session_id,
-            )
-
-    # 3. Monthly tier limit (per API key).
+    # 2. Monthly tier limit.
     over, tier, used, limit = is_over_limit(key_fingerprint)
     if over:
         from .usage import next_month_start_utc
@@ -110,10 +119,7 @@ async def route_message(
         retry_after = _seconds_until_next_month()
         logger.warning(
             "tier_limit_exceeded tier=%s used=%d limit=%d fingerprint=%s",
-            tier,
-            used,
-            limit,
-            key_fingerprint,
+            tier, used, limit, key_fingerprint,
         )
         try:
             audit.log_rate_limited(
@@ -135,6 +141,7 @@ async def route_message(
             session_id=message.session_id,
         )
 
+    # 3. Circuit breaker (may consume a step before raising).
     started = time.perf_counter()
 
     digest = payload_hash(message.payload)
@@ -149,10 +156,43 @@ async def route_message(
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
 
-    # 4. Record usage only AFTER the message is approved. Rejected
-    #    messages (schema failures, breaker trips) do not count.
+    # 4. Agent limit — atomic check-and-add.
+    # FIX (C8): the original did read → check → record, which had a TOCTOU
+    # race. Two concurrent requests with new agents could both pass the
+    # check and both record, blowing past the tier limit. Now the backend
+    # does the check+add in one atomic operation.
+    #
+    # NOTE on ordering: this runs AFTER the breaker. If the breaker trips,
+    # the step is consumed but agents are not recorded — consistent with
+    # the "rejected messages don't count" rule. If the agent check rejects,
+    # the step IS consumed (rare edge case where a user hits both limits
+    # at once). Acceptable trade-off.
+    agent_limit = settings.agent_limit_for_tier(tier)
+    requested_agents = {message.sender, message.recipient}
+    allowed, newly_added = check_and_add_agents_atomic(
+        key_fingerprint, requested_agents, agent_limit,
+    )
+    if not allowed:
+        current_agents = get_agents_set(key_fingerprint)
+        logger.warning(
+            "agent_limit_exceeded tier=%s current=%d limit=%d key=%s",
+            tier, len(current_agents), agent_limit, key_fingerprint,
+        )
+        raise AgentLimitExceeded(
+            message=(
+                f"Adding this handoff would introduce agents beyond your "
+                f"{tier} tier limit of {agent_limit} unique agents per month. "
+                f"Upgrade to protect more agents."
+            ),
+            tier=tier,
+            current_agents=len(current_agents),
+            limit=agent_limit,
+            attempted_new=sorted(newly_added),
+            session_id=message.session_id,
+        )
+
+    # 5. Record message usage only after all checks pass.
     new_usage = record_message(key_fingerprint)
-    record_agents(key_fingerprint, message.sender, message.recipient)
 
     metrics.inc_approved()
     try:
@@ -184,7 +224,6 @@ async def route_message(
 
 
 def _seconds_until_next_month() -> int:
-    """Return the number of seconds from now until the next UTC month start."""
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
@@ -210,7 +249,6 @@ def _seconds_until_next_month() -> int:
 async def get_my_usage(
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> UsageResponse:
-    """Return the calling key's tier, limit, and messages used this month."""
     snap = snapshot(key_fingerprint)
     return UsageResponse(**snap.to_dict())
 
@@ -227,7 +265,6 @@ async def get_my_usage(
     summary="System health check.",
 )
 async def health() -> HealthResponse:
-    """Liveness/readiness probe. Intentionally unauthenticated."""
     try:
         active = session_store.active_count()
     except Exception as e:
@@ -252,7 +289,7 @@ async def health() -> HealthResponse:
 
 
 # ---------------------------------------------------------------------------
-# Admin: session listing and inspection
+# Admin: session listing and inspection (now gated)
 # ---------------------------------------------------------------------------
 
 
@@ -273,14 +310,19 @@ def _snapshot_to_summary(s: SessionSnapshot, now: float) -> SessionSummary:
     response_model=SessionListResponse,
     status_code=status.HTTP_200_OK,
     summary="List active sessions (admin).",
-    responses={401: {"description": "Missing or invalid API key."}},
+    responses={
+        401: {"description": "Missing or invalid API key."},
+        403: {"description": "Admin access required."},
+    },
 )
 async def list_sessions(
-    _key_fingerprint: Annotated[str, Depends(verify_api_key)],
+    key_fingerprint: Annotated[str, Depends(verify_api_key)],
     limit: int = Query(default=100, ge=1, le=10_000),
     offset: int = Query(default=0, ge=0),
     min_step: Optional[int] = Query(default=None, ge=0),
 ) -> SessionListResponse:
+    _require_admin(key_fingerprint)
+
     try:
         raw = session_store.list_sessions()
     except Exception as e:
@@ -311,13 +353,16 @@ async def list_sessions(
     summary="Inspect a single session (admin).",
     responses={
         401: {"description": "Missing or invalid API key."},
+        403: {"description": "Admin access required."},
         404: {"description": "Session not found."},
     },
 )
 async def get_session(
     session_id: str,
-    _key_fingerprint: Annotated[str, Depends(verify_api_key)],
+    key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> SessionDetailResponse:
+    _require_admin(key_fingerprint)
+
     try:
         snap = session_store.get(session_id)
     except Exception as e:
@@ -351,7 +396,7 @@ async def get_session(
 
 
 # ---------------------------------------------------------------------------
-# Admin: bulk cleanup
+# Admin: bulk cleanup (now gated)
 # ---------------------------------------------------------------------------
 
 
@@ -360,13 +405,18 @@ async def get_session(
     response_model=CleanupResponse,
     status_code=status.HTTP_200_OK,
     summary="Expire idle sessions (admin).",
-    responses={401: {"description": "Missing or invalid API key."}},
+    responses={
+        401: {"description": "Missing or invalid API key."},
+        403: {"description": "Admin access required."},
+    },
 )
 async def cleanup_sessions(
     request: Request,
     body: CleanupRequest,
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> CleanupResponse:
+    _require_admin(key_fingerprint)
+
     try:
         snapshots = session_store.list_sessions()
     except Exception as e:
@@ -393,8 +443,7 @@ async def cleanup_sessions(
             except Exception as e:
                 logger.warning(
                     "cleanup_reset_failed session_id=%s error=%s",
-                    s.session_id,
-                    e,
+                    s.session_id, e,
                 )
 
     try:
@@ -409,30 +458,32 @@ async def cleanup_sessions(
 
     logger.info(
         "cleanup_completed expired=%d remaining=%d older_than_seconds=%d key=%s",
-        expired,
-        remaining,
-        body.older_than_seconds,
-        key_fingerprint,
+        expired, remaining, body.older_than_seconds, key_fingerprint,
     )
 
     return CleanupResponse(expired=expired, remaining=remaining)
 
 
 # ---------------------------------------------------------------------------
-# Reset single session
+# Reset single session (now gated)
 # ---------------------------------------------------------------------------
 
 
 @router.delete(
     "/v1/sessions/{session_id}",
     status_code=status.HTTP_200_OK,
-    summary="Reset a session (admin utility).",
-    responses={401: {"description": "Missing or invalid API key."}},
+    summary="Reset a session (admin).",
+    responses={
+        401: {"description": "Missing or invalid API key."},
+        403: {"description": "Admin access required."},
+    },
 )
 async def reset_session(
     session_id: str,
     key_fingerprint: Annotated[str, Depends(verify_api_key)],
 ) -> JSONResponse:
+    _require_admin(key_fingerprint)
+
     removed = session_store.reset(session_id)
     try:
         metrics.set_active_sessions(session_store.active_count())

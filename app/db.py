@@ -24,16 +24,29 @@ if _db_path_env:
 else:
     DB_PATH = Path(__file__).resolve().parent.parent / "agenttrafficcop.db"
 
-# Ensure the parent directory exists (important for Render Disks)
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+# FIX: the original did a bare `DB_PATH.parent.mkdir(...)` at import time.
+# If the parent dir isn't writable (Render disk not mounted, read-only FS,
+# permission error), the process died with a raw PermissionError and no
+# log line explaining why. Wrap it, emit a critical log with a hint, then
+# still raise — crashing is correct here, but now it's diagnosable.
+try:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+except OSError as e:
+    logger.critical(
+        "db_parent_dir_unavailable path=%s error=%s "
+        "hint='On Render, mount a persistent disk and set "
+        "ATC_DB_PATH=/data/agenttrafficcop.db'",
+        DB_PATH.parent,
+        e,
+    )
+    raise
 
 
 def init_db() -> None:
     """Create the tables if they don't exist."""
     with get_db() as conn:
         cursor = conn.cursor()
-        
-        # Users table
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,8 +55,7 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # API Keys table
+
         # key_hash stores the SHA-256 hash of the key, never the raw key.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
@@ -57,7 +69,7 @@ def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         """)
-        
+
         conn.commit()
         logger.info("database_initialized path=%s", DB_PATH)
 
@@ -65,13 +77,12 @@ def init_db() -> None:
 @contextmanager
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """Context manager for database connections.
-    
+
     Yields:
         sqlite3.Connection: A connection with row_factory set to sqlite3.Row.
     """
-    # timeout=10.0 prevents immediate crashes if the DB is temporarily locked
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
-    conn.row_factory = sqlite3.Row  # Access columns by name
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
