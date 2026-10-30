@@ -15,7 +15,12 @@ from .config import settings
 from .db import get_db
 from .middleware import _SlidingWindowLimiter, _client_key
 from .schemas import UsageResponse
-from .usage import snapshot, _resolve_usage_key, get_tier_and_limit
+from .usage import (
+    snapshot, 
+    _resolve_usage_key, 
+    get_tier_and_limit,
+    get_api_key_created_at,
+)
 from .userstore import user_store, User
 
 logger = logging.getLogger("agenttrafficcop.auth")
@@ -23,11 +28,6 @@ router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/auth/login")
 
-
-# FIX (C1): dedicated per-IP limiter for /v1/auth/*. The original had
-# zero auth rate limiting — unlimited password brute force, unlimited
-# account creation. 10/minute is generous for humans and brutal for bots.
-# Note: real botnets use many IPs; per-email lockout is the week-2 fix.
 _auth_limiter = _SlidingWindowLimiter(
     max_per_window=10,
     window_seconds=60,
@@ -57,15 +57,8 @@ def _enforce_auth_rate_limit(request: Request) -> None:
 
 class UserRegister(BaseModel):
     email: EmailStr
-    # Field-level limit is char-based; the validator below enforces the
-    # bcrypt *byte* limit, which is what actually matters.
     password: str = Field(..., min_length=8, max_length=72)
 
-    # FIX (C4): bcrypt truncates at 72 *bytes*, not 72 chars. A 72-char
-    # password full of multi-byte UTF-8 (e.g. "é") is silently truncated,
-    # so "é"*36 + "AAAA" and "é"*36 + "BBBB" hash identically. Enforce
-    # the byte limit explicitly so users get a clear error instead of
-    # a false sense of password strength.
     @field_validator("password")
     @classmethod
     def _bcrypt_byte_limit(cls, v: str) -> str:
@@ -128,7 +121,6 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
 @router.post("/v1/auth/register", response_model=Token, status_code=201)
 async def register(request: Request, body: UserRegister):
     """Register a new user and generate their first free API key."""
-    # FIX (C1): rate limit before bcrypt to prevent CPU DoS.
     _enforce_auth_rate_limit(request)
 
     try:
@@ -140,6 +132,7 @@ async def register(request: Request, body: UserRegister):
 
     _resolve_usage_key.cache_clear()
     get_tier_and_limit.cache_clear()
+    get_api_key_created_at.cache_clear()
 
     access_token = create_access_token(data={"sub": user.email})
     logger.info("user_registered email=%s", user.email)
@@ -152,7 +145,6 @@ async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ):
     """Login with email and password to get a JWT."""
-    # FIX (C1): rate limit before bcrypt/password-verify.
     _enforce_auth_rate_limit(request)
 
     user = user_store.get_user_by_email(form_data.username)
@@ -214,9 +206,6 @@ async def create_new_key(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Generate a new API key, enforcing tier limits."""
-    # FIX (C1): even authenticated users shouldn't spam key generation.
-    # Each call hits SQLite + bcrypt-adjacent hashing, and a user could
-    # DoS their own account if compromised.
     _enforce_auth_rate_limit(request)
 
     tier = user_store.get_user_tier(current_user.id)
@@ -244,5 +233,6 @@ async def create_new_key(
 
     _resolve_usage_key.cache_clear()
     get_tier_and_limit.cache_clear()
+    get_api_key_created_at.cache_clear()
 
     return {"api_key": raw_key, "message": "Save this key. It will not be shown again."}
