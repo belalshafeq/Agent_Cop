@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root { --bg: #000000; --bg-1: #0a0a0a; --bg-2: #111111; --fg: #ededed; --fg-1: #a1a1a1; --fg-2: #666666; --fg-3: #333333; --line: #1f1f1f; --line-2: #2a2a2a; --accent: #10b981; --accent-2: #34d399; --error: #f87171; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -148,6 +149,11 @@
         </div>
       </div>
 
+      <div class="key-box" style="margin-bottom: 24px;">
+        <div class="tier-label">7-Day Activity (Approved vs Rejected)</div>
+        <canvas id="usageChart" style="max-height: 200px; margin-top: 16px;"></canvas>
+      </div>
+
       <div class="key-box">
         <div class="tier-label">Active API Key Fingerprint</div>
         <div class="fingerprint" id="api-fingerprint">••••••••</div>
@@ -208,7 +214,6 @@
       document.getElementById('tab-login').classList.toggle('active', mode === 'login');
       document.getElementById('tab-register').classList.toggle('active', mode === 'register');
       
-      // Updated Copy for Conversion
       document.getElementById('auth-title').textContent = mode === 'login' ? 'Welcome back' : 'Claim your free API key';
       document.getElementById('auth-subtitle').textContent = mode === 'login' ? 'Sign in to manage your keys.' : '5 agents free. No credit card required.';
       document.getElementById('submit-btn').textContent = mode === 'login' ? 'Sign In' : 'Generate API Key';
@@ -360,6 +365,41 @@
           document.getElementById('usage-reset').textContent = resetDate.toLocaleDateString();
         }
 
+        // Fetch Metrics Chart
+        const metricsRes = await fetch(`${API_BASE}/v1/auth/metrics`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (metricsRes.ok) {
+          const metricsData = await metricsRes.json();
+          const labels = metricsData.metrics.map(m => m.date);
+          const approvedData = metricsData.metrics.map(m => m.approved);
+          const rejectedData = metricsData.metrics.map(m => m.rejected);
+
+          const ctx = document.getElementById('usageChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [
+                { label: 'Approved', data: approvedData, backgroundColor: '#10b981' },
+                { label: 'Rejected (Trips)', data: rejectedData, backgroundColor: '#f87171' }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { stacked: true, grid: { color: '#1f1f1f' }, ticks: { color: '#a1a1a1' } },
+                y: { stacked: true, grid: { color: '#1f1f1f' }, ticks: { color: '#a1a1a1' } }
+              },
+              plugins: {
+                legend: { labels: { color: '#ededed' } }
+              }
+            }
+          });
+        }
+
       } catch (err) { 
         console.error(err); 
       }
@@ -425,6 +465,13 @@
       localStorage.removeItem('atc_token');
       window.location.reload();
     }
+
+    // --- FIX: Check if user is already logged in on page load ---
+    document.addEventListener("DOMContentLoaded", () => {
+      if (localStorage.getItem('atc_token')) {
+        showDashboard();
+      }
+    });
   </script>
 </body>
 </html>
