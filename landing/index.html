@@ -229,6 +229,16 @@
     .plan .btn:hover { background: var(--fg); color: var(--bg); border-color: var(--fg); }
     .plan.featured .btn { background: var(--fg); color: var(--bg); border-color: var(--fg); }
     .plan.featured .btn:hover { background: transparent; color: var(--fg); }
+    
+    /* NEW: Disabled Button Styles */
+    .plan .btn.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      background: transparent !important;
+      color: var(--fg-2) !important;
+      border-color: var(--line-2) !important;
+    }
+
     @media (max-width: 900px) {
       .pricing { grid-template-columns: 1fr; }
       .plan { border-right: none; border-bottom: 1px solid var(--line); }
@@ -292,7 +302,7 @@
   <div class="wrap">
     <div class="hero-eyebrow reveal">
       <span class="dot"></span>
-      <span>v1.0.0 · now available on PyPI</span>
+      <span>v1.0.1 · now available on PyPI</span>
     </div>
 
     <h1 class="reveal d1">
@@ -321,7 +331,7 @@
     <div class="trust-microwcopy reveal d3">
       <span>No credit card required</span>
       <span>5 Agents free</span>
-      <span>213 tests passing</span>
+      <span>190+ tests passing</span>
     </div>
 
     <!-- Interactive Terminal -->
@@ -434,7 +444,7 @@
       </div>
       <div class="code-body" id="python-snippet"><span class="kw">from</span> agenttrafficcop <span class="kw">import</span> Guard, LoopDetected
 
-guard = Guard(url=<span class="str">"https://YOUR-RENDER-URL.onrender.com"</span>, api_key=<span class="str">"your-key"</span>)
+guard = Guard(url=<span class="str">"https://api.agenttrafficcop.com"</span>, api_key=<span class="str">"your-key"</span>)
 
 <span class="kw">try</span>:
     result = <span class="kw">await</span> guard.check(
@@ -528,7 +538,7 @@ guard = Guard(url=<span class="str">"https://YOUR-RENDER-URL.onrender.com"</span
           <li>120 requests / minute</li>
           <li>Usage analytics + Email support</li>
         </ul>
-        <a href="dashboard.html" class="btn">Upgrade</a>
+        <button class="btn disabled" disabled>Coming Soon</button>
       </div>
 
       <div class="plan">
@@ -541,7 +551,7 @@ guard = Guard(url=<span class="str">"https://YOUR-RENDER-URL.onrender.com"</span
           <li>300 requests / minute</li>
           <li>Priority support</li>
         </ul>
-        <a href="dashboard.html" class="btn">Upgrade</a>
+        <button class="btn disabled" disabled>Coming Soon</button>
       </div>
     </div>
   </div>

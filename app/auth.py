@@ -236,3 +236,26 @@ async def create_new_key(
     get_api_key_created_at.cache_clear()
 
     return {"api_key": raw_key, "message": "Save this key. It will not be shown again."}
+
+@router.delete("/v1/auth/keys")
+async def revoke_all_keys(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Revoke all active API keys so the user can generate a new one."""
+    _enforce_auth_rate_limit(request)
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE api_keys SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL",
+            (current_user.id,),
+        )
+        conn.commit()
+        
+    _resolve_usage_key.cache_clear()
+    get_tier_and_limit.cache_clear()
+    get_api_key_created_at.cache_clear()
+
+    logger.info("user_revoked_keys user_id=%s", current_user.id)
+    return {"status": "success", "message": "All API keys revoked. You can now generate a new one."}

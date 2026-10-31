@@ -19,33 +19,26 @@
     .brand-mark { width: 20px; height: 20px; border: 1px solid var(--line-2); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
     .brand-mark::after { content: ''; width: 6px; height: 6px; background: var(--fg); border-radius: 50%; }
     .main-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
-    
     .card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px; padding: 32px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
     .auth-tabs { display: flex; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px; margin-bottom: 24px; }
     .auth-tab { flex: 1; text-align: center; padding: 8px; font-size: 13px; font-weight: 500; color: var(--fg-1); border-radius: 6px; cursor: pointer; transition: all 0.2s; border: none; background: transparent; }
     .auth-tab:hover { color: var(--fg); }
     .auth-tab.active { background: var(--bg-2); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
-
     .form-group { margin-bottom: 16px; }
     .form-group label { display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-1); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; font-family: 'Geist Mono', monospace; }
     .input-wrapper { position: relative; }
     .form-group input { width: 100%; background: var(--bg); border: 1px solid var(--line-2); color: var(--fg); padding: 12px; border-radius: 6px; font-family: 'Geist', sans-serif; outline: none; transition: border-color 0.2s; }
     .form-group input:focus { border-color: var(--fg-1); }
     .form-group input.invalid { border-color: var(--error); }
-    
     .toggle-password { position: absolute; right: 12px; top: 12px; cursor: pointer; color: var(--fg-2); font-size: 12px; font-weight: 500; user-select: none; transition: color 0.2s; }
     .toggle-password:hover { color: var(--fg); }
-
     .btn-primary { width: 100%; background: var(--fg); color: var(--bg); border: 1px solid var(--fg); padding: 12px; border-radius: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; margin-top: 8px; display: flex; justify-content: center; align-items: center; gap: 8px; }
     .btn-primary:hover { background: transparent; color: var(--fg); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-    
     .btn-secondary { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.2s; font-weight: 500; }
     .btn-secondary:hover { background: var(--line); }
-
     .hidden { display: none !important; }
     .error-msg { color: var(--error); font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
-
     .dashboard-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
     .dashboard-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
     .dashboard-email { color: var(--fg-1); font-size: 13px; margin-top: 4px; }
@@ -59,7 +52,6 @@
     .new-key-value { font-family: 'Geist Mono', monospace; font-size: 14px; word-break: break-all; color: var(--fg); padding-right: 60px; }
     .copy-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--accent); color: var(--bg); border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
     .copy-btn:hover { opacity: 0.8; }
-
     .page-footer { border-top: 1px solid var(--line); padding: 24px 32px; text-align: center; font-size: 12px; color: var(--fg-2); }
     .page-footer a { margin: 0 8px; transition: color 0.15s; }
     .page-footer a:hover { color: var(--fg); }
@@ -75,6 +67,7 @@
   </header>
 
   <div class="main-container">
+    <!-- AUTH SECTION -->
     <div id="auth-section" class="card">
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Sign In</button>
@@ -107,11 +100,12 @@
       <p id="auth-error" class="error-msg"></p>
     </div>
 
+    <!-- DASHBOARD SECTION -->
     <div id="dashboard-section" class="card hidden">
       <div class="dashboard-header">
         <div>
           <div class="dashboard-title">Your Workspace</div>
-          <div class="dashboard-email" id="user-email">loading...</div>
+          <div class="dashboard-email" id="user-email">...</div>
         </div>
         <button onclick="logout()" class="btn-secondary">Sign Out</button>
       </div>
@@ -119,16 +113,17 @@
       <div class="tier-box">
         <div class="tier-label">Current Plan</div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div class="tier-value" id="user-tier">Free</div>
-          <button id="upgrade-btn" class="btn-primary" onclick="upgradePlan()" style="width: auto; padding: 8px 16px; margin-top: 0; font-size: 13px;">Upgrade to Pro</button>
+          <div class="tier-value" id="user-tier">...</div>
+          <!-- FIX: Made the upgrade button disabled and visually non-interactive -->
+          <button id="upgrade-btn" class="btn-primary" disabled style="width: auto; padding: 8px 16px; margin-top: 0; font-size: 13px; opacity: 0.5; cursor: not-allowed;">Pro (Coming Soon)</button>
         </div>
       </div>
 
       <div class="key-box" style="margin-bottom: 24px;">
         <div class="tier-label">Protected Agents</div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
-          <div class="fingerprint" id="agents-count" style="color: var(--fg); font-size: 24px;">0</div>
-          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="agents-limit">5</span> agents</div>
+          <div class="fingerprint" id="agents-count" style="color: var(--fg); font-size: 24px;">...</div>
+          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="agents-limit">...</span> agents</div>
         </div>
         <div style="width: 100%; height: 8px; background: var(--line); border-radius: 4px; margin-top: 12px; overflow: hidden;">
           <div id="agents-progress" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.5s ease;"></div>
@@ -138,8 +133,8 @@
       <div class="key-box" style="margin-bottom: 24px;">
         <div class="tier-label">Monthly Messages</div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
-          <div class="fingerprint" id="usage-count" style="color: var(--fg); font-size: 24px;">0</div>
-          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="usage-limit">10,000</span> msgs</div>
+          <div class="fingerprint" id="usage-count" style="color: var(--fg); font-size: 24px;">...</div>
+          <div style="font-size: 13px; color: var(--fg-2);">/ <span id="usage-limit">...</span> msgs</div>
         </div>
         <div style="width: 100%; height: 8px; background: var(--line); border-radius: 4px; margin-top: 12px; overflow: hidden;">
           <div id="usage-progress" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.5s ease;"></div>
@@ -150,13 +145,13 @@
       </div>
 
       <div class="key-box" style="margin-bottom: 24px;">
-        <div class="tier-label">7-Day Activity (Approved vs Rejected)</div>
+        <div class="tier-label">7-Day Activity</div>
         <canvas id="usageChart" style="max-height: 200px; margin-top: 16px;"></canvas>
       </div>
 
       <div class="key-box">
         <div class="tier-label">Active API Key Fingerprint</div>
-        <div class="fingerprint" id="api-fingerprint">••••••••</div>
+        <div class="fingerprint" id="api-fingerprint">...</div>
         
         <p style="font-size: 12px; color: var(--fg-2); margin-top: 12px; line-height: 1.4;">
           For security, keys are only shown once upon creation. If lost, generate a new one.
@@ -164,7 +159,10 @@
 
         <div style="margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;">
           <div style="font-size: 13px; color: var(--fg-1);">Need a new key?</div>
-          <button onclick="generateKey()" class="btn-secondary">Generate Key</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="revoke-btn" onclick="revokeKey()" class="btn-secondary" style="color: var(--error); border-color: rgba(248, 113, 113, 0.3);">Revoke</button>
+            <button id="gen-btn" onclick="generateKey()" class="btn-secondary">Generate Key</button>
+          </div>
         </div>
         <div id="new-key-display" class="new-key-alert hidden">
           <div class="new-key-label">Save this key. It will not be shown again.</div>
@@ -184,17 +182,15 @@
   <script>
     const hostname = window.location.hostname;
     let API_BASE;
-
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       API_BASE = 'http://localhost:8000';
     } else if (hostname.includes('github.dev')) {
-      const backendHostname = hostname.replace('-3000', '-8000').replace('-3001', '-8000');
-      API_BASE = `https://${backendHostname}`;
+      API_BASE = `https://${hostname.replace('-3000', '-8000').replace('-3001', '-8000')}`;
     } else {
       API_BASE = 'https://api.agenttrafficcop.com';
     }
 
-    fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => console.log("Waking server..."));
+    fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => {});
 
     let currentMode = 'login';
 
@@ -251,9 +247,14 @@
         return;
       }
 
-      btn.textContent = "Generating...";
+      const originalText = btn.textContent;
+      btn.textContent = "Loading...";
       btn.disabled = true;
       errorEl.textContent = '';
+
+      const slowTimer = setTimeout(() => {
+        btn.textContent = "Waking up server... (~30s)";
+      }, 3000);
 
       try {
         let res;
@@ -284,28 +285,25 @@
                  errMsg = 'Please enter a valid email address.'; 
                  emailInput.classList.add('invalid'); 
              }
-          } else if (typeof data.detail === 'string') { 
-             errMsg = data.detail; 
-          } else if (Array.isArray(data.detail)) { 
-             errMsg = data.detail[0].msg; 
-          } else if (data.message) { 
-             errMsg = data.message; 
-          }
+          } else if (typeof data.detail === 'string') { errMsg = data.detail; } 
+          else if (Array.isArray(data.detail)) { errMsg = data.detail[0].msg; } 
+          else if (data.message) { errMsg = data.message; }
           throw new Error(errMsg);
         }
 
         localStorage.setItem('atc_token', data.access_token);
-        
-        if (data.api_key) {
-          showNewKey(data.api_key);
-        }
-        
+        if (data.api_key) showNewKey(data.api_key);
         showDashboard();
 
       } catch (err) {
-        errorEl.textContent = err.message;
+        if (err.name === 'TypeError' || err.message.includes('fetch')) {
+           errorEl.textContent = "Network error. Our servers are likely waking up. Please wait 30s and try again.";
+        } else {
+           errorEl.textContent = err.message;
+        }
       } finally {
-        btn.textContent = currentMode === 'login' ? 'Sign In' : 'Generate API Key';
+        clearTimeout(slowTimer);
+        btn.textContent = originalText;
         btn.disabled = false;
       }
     });
@@ -365,7 +363,6 @@
           document.getElementById('usage-reset').textContent = resetDate.toLocaleDateString();
         }
 
-        // Fetch Metrics Chart
         const metricsRes = await fetch(`${API_BASE}/v1/auth/metrics`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -377,7 +374,9 @@
           const rejectedData = metricsData.metrics.map(m => m.rejected);
 
           const ctx = document.getElementById('usageChart').getContext('2d');
-          new Chart(ctx, {
+          if (window.myUsageChart) window.myUsageChart.destroy();
+
+          window.myUsageChart = new Chart(ctx, {
             type: 'bar',
             data: {
               labels: labels,
@@ -387,15 +386,12 @@
               ]
             },
             options: {
-              responsive: true,
-              maintainAspectRatio: false,
+              responsive: true, maintainAspectRatio: false,
               scales: {
                 x: { stacked: true, grid: { color: '#1f1f1f' }, ticks: { color: '#a1a1a1' } },
                 y: { stacked: true, grid: { color: '#1f1f1f' }, ticks: { color: '#a1a1a1' } }
               },
-              plugins: {
-                legend: { labels: { color: '#ededed' } }
-              }
+              plugins: { legend: { labels: { color: '#ededed' } } }
             }
           });
         }
@@ -406,6 +402,11 @@
     }
 
     async function generateKey() {
+      const btn = document.getElementById('gen-btn');
+      const originalText = btn.textContent;
+      btn.textContent = "Generating...";
+      btn.disabled = true;
+      
       const token = localStorage.getItem('atc_token');
       try {
         const res = await fetch(`${API_BASE}/v1/auth/keys`, {
@@ -414,14 +415,53 @@
         });
         if (res.status === 401) return logout();
         const data = await res.json();
+        
         if (res.ok) {
           showNewKey(data.api_key);
           showDashboard();
         } else {
-          alert(data.detail || data.message || "Failed to generate key.");
+          btn.textContent = data.detail || "Limit reached";
+          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
+          return; 
         }
       } catch (err) {
-        alert("Failed to generate key");
+        btn.textContent = "Network Error";
+        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
+        return;
+      }
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+
+    async function revokeKey() {
+      if (!confirm("Are you sure? This will instantly break any agents using this key.")) return;
+      
+      const btn = document.getElementById('revoke-btn');
+      const originalText = btn.textContent;
+      btn.textContent = "Revoking...";
+      btn.disabled = true;
+
+      const token = localStorage.getItem('atc_token');
+      try {
+        const res = await fetch(`${API_BASE}/v1/auth/keys`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.status === 401) return logout();
+        const data = await res.json();
+        
+        if (res.ok) {
+          btn.textContent = "Revoked!";
+          setTimeout(() => showDashboard(), 1000);
+        } else {
+          btn.textContent = data.detail || "Failed";
+          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
+          return;
+        }
+      } catch (err) {
+        btn.textContent = "Network Error";
+        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
+        return;
       }
     }
 
@@ -436,29 +476,8 @@
         const btn = document.querySelector('.copy-btn');
         btn.textContent = 'COPIED!';
         btn.style.background = 'var(--fg)';
-        setTimeout(() => { 
-            btn.textContent = 'COPY'; 
-            btn.style.background = 'var(--accent)'; 
-        }, 2000);
+        setTimeout(() => { btn.textContent = 'COPY'; btn.style.background = 'var(--accent)'; }, 2000);
       });
-    }
-
-    async function upgradePlan() {
-      const token = localStorage.getItem('atc_token');
-      try {
-        const res = await fetch(`${API_BASE}/v1/billing/checkout`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.status === 401) return logout();
-        const data = await res.json();
-        if (res.ok && data.checkout_url) {
-          window.location.href = data.checkout_url;
-        } else {
-          alert(data.detail || data.message || "Billing not configured yet.");
-        }
-      } catch (err) {
-        alert("Failed to connect to billing system");
-      }
     }
 
     function logout() {
@@ -466,11 +485,8 @@
       window.location.reload();
     }
 
-    // --- FIX: Check if user is already logged in on page load ---
     document.addEventListener("DOMContentLoaded", () => {
-      if (localStorage.getItem('atc_token')) {
-        showDashboard();
-      }
+      if (localStorage.getItem('atc_token')) showDashboard();
     });
   </script>
 </body>

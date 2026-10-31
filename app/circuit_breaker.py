@@ -33,9 +33,7 @@ def evaluate(
     if snapshot.step >= settings.max_steps:
         logger.warning(
             "step_limit_exceeded session_id=%s step=%d max=%d",
-            snapshot.session_id,
-            snapshot.step,
-            settings.max_steps,
+            snapshot.session_id, snapshot.step, settings.max_steps,
         )
         try:
             metrics.inc_trip("step_limit")
@@ -69,16 +67,23 @@ def evaluate(
             },
         )
 
-    new_snapshot = session_store.record(snapshot.session_id, payload_hash)
+    # FIX 4: Build a temporary snapshot to test loops BEFORE committing the step.
+    # This ensures a tripped loop doesn't eat up the user's step budget.
+    new_hashes = snapshot.hashes + [payload_hash]
+    temp_snapshot = SessionSnapshot(
+        session_id=snapshot.session_id,
+        step=snapshot.step + 1,
+        hashes=new_hashes,
+        created_at=snapshot.created_at,
+        last_seen=snapshot.last_seen,
+    )
 
     # --- Check 2: consecutive identical hashes ---------------------------
-    repeats = new_snapshot.consecutive_repeats()
+    repeats = temp_snapshot.consecutive_repeats()
     if repeats >= settings.max_repeated_hashes:
         logger.warning(
             "repeated_payload_loop session_id=%s step=%d repeats=%d",
-            new_snapshot.session_id,
-            new_snapshot.step,
-            repeats,
+            temp_snapshot.session_id, temp_snapshot.step, repeats,
         )
         try:
             metrics.inc_trip("repeated_payload")
@@ -86,9 +91,9 @@ def evaluate(
             pass
         try:
             audit.log_trip(
-                session_id=new_snapshot.session_id,
+                session_id=temp_snapshot.session_id,
                 error_code="REPEATED_PAYLOAD_LOOP",
-                step=new_snapshot.step,
+                step=temp_snapshot.step,
                 sender=sender,
                 recipient=recipient,
                 diagnostics={
@@ -102,12 +107,12 @@ def evaluate(
             pass
         raise RepeatedPayloadLoop(
             message=(
-                f"Session '{new_snapshot.session_id}' produced identical "
+                f"Session '{temp_snapshot.session_id}' produced identical "
                 f"payload hash {repeats} times consecutively."
             ),
-            session_id=new_snapshot.session_id,
+            session_id=temp_snapshot.session_id,
             diagnostics={
-                "step": new_snapshot.step,
+                "step": temp_snapshot.step,
                 "repeated_hash": payload_hash,
                 "consecutive_repeats": repeats,
                 "max_repeated_hashes": settings.max_repeated_hashes,
@@ -116,14 +121,11 @@ def evaluate(
 
     # --- Check 3: cyclic (ping-pong) patterns ----------------------------
     for cycle_len in range(2, settings.max_cycle_length + 1):
-        repeats = new_snapshot.cycle_repeats(cycle_len)
+        repeats = temp_snapshot.cycle_repeats(cycle_len)
         if repeats >= settings.max_cycle_repeats:
             logger.warning(
                 "cyclic_payload_loop session_id=%s step=%d cycle_len=%d repeats=%d",
-                new_snapshot.session_id,
-                new_snapshot.step,
-                cycle_len,
-                repeats,
+                temp_snapshot.session_id, temp_snapshot.step, cycle_len, repeats,
             )
             try:
                 metrics.inc_trip("cyclic_payload")
@@ -131,9 +133,9 @@ def evaluate(
                 pass
             try:
                 audit.log_trip(
-                    session_id=new_snapshot.session_id,
+                    session_id=temp_snapshot.session_id,
                     error_code="CYCLIC_PAYLOAD_LOOP",
-                    step=new_snapshot.step,
+                    step=temp_snapshot.step,
                     sender=sender,
                     recipient=recipient,
                     diagnostics={
@@ -147,17 +149,19 @@ def evaluate(
                 pass
             raise CyclicPayloadLoop(
                 message=(
-                    f"Session '{new_snapshot.session_id}' entered a "
+                    f"Session '{temp_snapshot.session_id}' entered a "
                     f"repeating cycle of length {cycle_len} ({repeats} times)."
                 ),
-                session_id=new_snapshot.session_id,
+                session_id=temp_snapshot.session_id,
                 diagnostics={
-                    "step": new_snapshot.step,
+                    "step": temp_snapshot.step,
                     "cycle_length": cycle_len,
                     "cycle_repeats": repeats,
                     "max_cycle_repeats": settings.max_cycle_repeats,
-                    "recent_hashes": new_snapshot.hashes,
+                    "recent_hashes": temp_snapshot.hashes,
                 },
             )
 
+    # If all checks passed, we officially record the step.
+    new_snapshot = session_store.record(snapshot.session_id, payload_hash)
     return new_snapshot
