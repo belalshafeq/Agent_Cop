@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from .exceptions import (
+    AdminRequired,
     AgentTrafficCopError,
     AuthError,
     ConnectionError,
@@ -84,19 +85,10 @@ class Guard:
         await self.close()
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        """Return an AsyncClient bound to the *current* event loop.
-
-        We detect a loop mismatch (LangGraph and some frameworks create
-        child event loops) and transparently create a fresh client. This
-        keeps the "one client per Guard" optimization for the common case
-        while remaining correct under nested/multiple event loops.
-        """
+        """Return an AsyncClient bound to the *current* event loop."""
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
-            # No running loop — we're being called from sync code. Create
-            # a client anyway; the caller will hit an error on first use
-            # with a clearer message than ours would be.
             current_loop = None
 
         if (
@@ -106,14 +98,11 @@ class Guard:
         ):
             return self._client
 
-        # Either no client yet, or it's bound to a different loop.
-        # Close the old one if it's still open and its loop is alive.
         old = self._client
         if old is not None and not old.is_closed:
             try:
                 await old.aclose()
             except RuntimeError:
-                # Old client was bound to a dead loop; drop it.
                 pass
 
         self._client = httpx.AsyncClient(timeout=self._timeout)
@@ -121,8 +110,7 @@ class Guard:
         return self._client
 
     async def close(self) -> None:
-        """Close the underlying HTTP client. Safe to call multiple times
-        and from any event loop context."""
+        """Close the underlying HTTP client."""
         client = self._client
         self._client = None
         self._client_loop = None
@@ -131,7 +119,6 @@ class Guard:
         try:
             await client.aclose()
         except RuntimeError:
-            # Client was bound to a loop that has since closed.
             pass
 
     # --- Public API ---------------------------------------------------------
@@ -201,21 +188,20 @@ class Guard:
                 diagnostics={"body_preview": response.text[:200]},
             )
 
-        if response.status_code == 422:
+        if response.status_code in (422, 429, 402):
             try:
                 parsed = response.json()
             except ValueError:
                 parsed = {
-                    "error": "UNPARSEABLE_422",
-                    "message": "Server returned 422 with a non-JSON body.",
+                    "error": f"UNPARSEABLE_{response.status_code}",
+                    "message": f"Server returned {response.status_code} with a non-JSON body.",
                     "session_id": session_id,
                     "diagnostics": {"body_preview": response.text[:200]},
                 }
             raise exception_from_response(parsed)
 
         raise AgentTrafficCopError(
-            f"AgentTrafficCop returned unexpected HTTP "
-            f"{response.status_code}.",
+            f"AgentTrafficCop returned unexpected HTTP {response.status_code}.",
             error_code="UNEXPECTED_STATUS",
             session_id=session_id,
             diagnostics={
@@ -232,6 +218,8 @@ class Guard:
         try:
             response = await client.get(f"{self._base_url}/health")
         except httpx.RequestError as e:
+            # FIX (M4): wrap httpx errors as SDK-level ConnectionError,
+            # matching the behavior of check().
             raise ConnectionError(
                 f"Could not reach AgentTrafficCop at {self._base_url}: {e}",
                 error_code="CONNECTION_FAILED",
@@ -253,11 +241,20 @@ class Guard:
                 error_code="CONNECTION_FAILED",
                 session_id=session_id,
             ) from e
+
         if response.status_code == 401:
             raise AuthError(
                 "AgentTrafficCop rejected the API key.",
                 error_code="AUTH_INVALID",
                 session_id=session_id,
             )
+
+        if response.status_code == 403:
+            raise AdminRequired(
+                "This key is not authorized to reset sessions.",
+                error_code="ADMIN_REQUIRED",
+                session_id=session_id,
+            )
+
         response.raise_for_status()
         return bool(response.json().get("removed", False))

@@ -56,7 +56,6 @@ def init_db() -> None:
             )
         """)
 
-        # key_hash stores the SHA-256 hash of the key, never the raw key.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +69,11 @@ def init_db() -> None:
             )
         """)
 
+        # FIX: Add indexes for fast lookups. Without these, a 1M user database
+        # would do full table scans on every API request.
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id) WHERE revoked_at IS NULL")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_fingerprint ON api_keys(fingerprint) WHERE revoked_at IS NULL")
+
         conn.commit()
         logger.info("database_initialized path=%s", DB_PATH)
 
@@ -81,8 +85,18 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     Yields:
         sqlite3.Connection: A connection with row_factory set to sqlite3.Row.
     """
+    # timeout=10.0 prevents immediate crashes if the DB is temporarily locked
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row  # Access columns by name
+
+    # FIX: WAL mode drastically improves concurrent read/write performance.
+    # It allows readers and writers to coexist without blocking each other.
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception as e:
+        logger.warning("db_pragma_failed error=%s", e)
+
     try:
         yield conn
     finally:

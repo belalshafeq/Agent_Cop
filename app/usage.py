@@ -124,6 +124,7 @@ class InMemoryUsageBackend(UsageBackend):
         self._agents: Dict[Tuple[str, str], set[str]] = {}
 
     def _maybe_prune(self, current_month: str) -> None:
+        """Drop entries from prior months. Caller must hold the lock."""
         if len(self._data) > _PRUNE_THRESHOLD:
             stale = [k for k in self._data if k[1] < current_month]
             for k in stale:
@@ -259,6 +260,7 @@ class RedisUsageBackend(UsageBackend):
             return allowed, agents if allowed else set()
         except Exception as e:
             logger.warning("usage_check_and_add_agents_failed error=%s", e)
+            # Fail open — a Redis hiccup shouldn't reject real customers.
             return True, agents
 
 

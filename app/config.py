@@ -12,25 +12,16 @@ logger = logging.getLogger("agenttrafficcop.config")
 
 try:
     from dotenv import load_dotenv
-
     _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
     if _ENV_PATH.is_file():
         load_dotenv(dotenv_path=_ENV_PATH, override=False)
 except ImportError:  # pragma: no cover
     pass
 
-
-# FIX (C3): explicit list of environments treated as non-production.
-# Anything NOT in this set is treated as production — fail closed. The
-# old check matched {"production", "prod"} only, so `ATC_ENV=staging`
-# would silently bypass the JWT safety check and ship the placeholder
-# secret, making every JWT forgeable.
+# FIX: Fail closed. Any env not in this list is treated as production.
 _DEV_ENVS = frozenset({"development", "dev", "test", "testing", "local"})
 
-# FIX (#5): widen the list of known-bad JWT secrets. The old check only
-# matched the literal "super-secret-change-me-in-prod". Anyone "fixing"
-# the placeholder by changing it to another guessable value shipped
-# prod with a weak signing key.
+# FIX: Wide list of known-bad JWT secrets to prevent shipping insecure configs.
 _INSECURE_JWT_SECRETS = frozenset({
     "",
     "super-secret-change-me-in-prod",
@@ -109,17 +100,9 @@ class Settings:
     cors_origins: Optional[str] = field(
         default_factory=lambda: _env_optional_str("ATC_CORS_ORIGINS")
     )
-
-    # FIX (C5): only trust X-Forwarded-For when explicitly enabled.
-    # Default is False because an attacker with a direct connection can
-    # spoof the header and bypass rate limiting.
     trust_proxy: bool = field(
         default_factory=lambda: _env_bool("ATC_TRUST_PROXY", False)
     )
-
-    # FIX (M1): admin API keys — required to access /v1/admin/* and
-    # /v1/sessions/*. If empty, falls back to allowing any `team`-tier
-    # key with a warning at startup.
     admin_api_keys: Tuple[str, ...] = field(
         default_factory=lambda: _env_key_list("ATC_ADMIN_API_KEYS")
     )
@@ -260,7 +243,6 @@ class Settings:
 
     @property
     def is_production(self) -> bool:
-        # FIX (C3): fail closed. Any env not in _DEV_ENVS is production.
         return self.environment.lower() not in _DEV_ENVS
 
     @property
@@ -280,7 +262,11 @@ class Settings:
         return self.session_ttl_seconds > 0
 
     def _all_tier_keys(self) -> Tuple[str, ...]:
-        return self.free_api_keys + self.pro_api_keys + self.team_api_keys
+        return (
+            self.free_api_keys
+            + self.pro_api_keys
+            + self.team_api_keys
+        )
 
     def tier_for_key(self, key: str) -> str:
         if key in self.team_api_keys or key in self.api_keys:
@@ -315,7 +301,6 @@ class Settings:
 
 settings = Settings()
 
-
 # --- Production safety checks ---
 if settings.is_production:
     if settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
@@ -333,9 +318,6 @@ elif settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
         settings.environment,
     )
 
-# FIX (M1): warn if admin API keys aren't configured. Admin endpoints
-# will fall back to team-tier auth, which is less strict than a dedicated
-# list but at least prevents free-tier users from accessing them.
 if not settings.admin_api_keys and settings.auth_enabled:
     logger.warning(
         "admin_api_keys_not_configured — admin endpoints will accept any "

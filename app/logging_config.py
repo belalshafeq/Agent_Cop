@@ -2,17 +2,6 @@
 
 Installs a single JSON formatter on the root logger. Every log record
 becomes one line of parseable JSON with a stable schema:
-
-    {
-    "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S") + "Z",
-    "level": "INFO",
-    "logger": "agenttrafficcop.breaker",
-    "message": "step_limit_exceeded session_id=... step=25 max=25",
-    ... extra fields attached via logger.info(..., extra={...})
-    }
-
-The function is idempotent — importing or calling it multiple times
-will not stack formatters.
 """
 
 from __future__ import annotations
@@ -20,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 from typing import Any, Dict
 
 from .config import settings
@@ -28,31 +18,19 @@ from .config import settings
 class JsonFormatter(logging.Formatter):
     """Emit log records as single-line JSON."""
 
+    # FIX: Force UTC time. The original used local time but appended "Z",
+    # which made logs lie about their timezone (e.g., Karachi time at 10am
+    # would show as 10:00Z instead of 05:00Z).
+    converter = time.gmtime
+
     # Fields provided by the logging module that we don't want to
     # duplicate as "extra" attributes.
     _RESERVED = frozenset(
         {
-            "name",
-            "msg",
-            "args",
-            "levelname",
-            "levelno",
-            "pathname",
-            "filename",
-            "module",
-            "exc_info",
-            "exc_text",
-            "stack_info",
-            "lineno",
-            "funcName",
-            "created",
-            "msecs",
-            "relativeCreated",
-            "thread",
-            "threadName",
-            "processName",
-            "process",
-            "message",
+            "name", "msg", "args", "levelname", "levelno", "pathname",
+            "filename", "module", "exc_info", "exc_text", "stack_info",
+            "lineno", "funcName", "created", "msecs", "relativeCreated",
+            "thread", "threadName", "processName", "process", "message",
             "asctime",
         }
     )

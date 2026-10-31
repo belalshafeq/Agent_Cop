@@ -230,7 +230,7 @@
     .plan.featured .btn { background: var(--fg); color: var(--bg); border-color: var(--fg); }
     .plan.featured .btn:hover { background: transparent; color: var(--fg); }
     
-    /* NEW: Disabled Button Styles */
+    /* FIX: Disabled Button Styles */
     .plan .btn.disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -651,17 +651,14 @@ guard = Guard(url=<span class="str">"https://api.agenttrafficcop.com"</span>, ap
     const run2 = document.getElementById('run2-terminal');
     const btn = document.getElementById('terminal-btn');
     
-    // Reveal the second run
     run2.classList.add('visible');
     
-    // Change button state
     btn.textContent = '🛑 Breaker Tripped';
     btn.style.color = '#f87171';
     btn.style.borderColor = '#f87171';
     btn.style.background = 'rgba(248, 113, 113, 0.1)';
     btn.disabled = true;
     
-    // Scroll the terminal to the bottom
     const terminalBody = run2.closest('.terminal-body');
     if(terminalBody) {
         terminalBody.scrollTop = terminalBody.scrollHeight;

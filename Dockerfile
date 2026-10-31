@@ -39,7 +39,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 
 RUN groupadd --system --gid 1001 atc && \
-    useradd  --system --uid 1001 --gid atc --create-home atc
+    useradd --system --uid 1001 --gid atc --create-home atc
 
 WORKDIR /app
 
@@ -52,7 +52,7 @@ USER atc
 
 EXPOSE 8000
 
-# FIX (#1): the original HEALTHCHECK ran a Python snippet that called
+# FIX (#1): The original HEALTHCHECK ran a Python snippet that called
 # os.environ.get(...) without ever importing `os` → NameError on every
 # probe → container permanently unhealthy → orchestrator stops routing
 # traffic. Single-quoted python -c with no backslashes.

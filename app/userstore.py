@@ -106,7 +106,14 @@ class UserStore:
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against a hash."""
-        return pwd_context.verify(plain_password, hashed_password)
+        # FIX: If `hashed_password` is malformed (someone inserted a bad row,
+        # DB migration glitch), passlib raises ValueError → 500 on login.
+        # A malformed user record should fail auth cleanly, not crash.
+        try:
+            return pwd_context.verify(plain_password, hashed_password)
+        except (ValueError, TypeError):
+            logger.warning("password_verify_bad_hash")
+            return False
 
 
 # Singleton instance

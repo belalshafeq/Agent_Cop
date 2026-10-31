@@ -28,6 +28,7 @@ router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/auth/login")
 
+# FIX: Dedicated rate limiter for auth routes to stop brute-force and spam.
 _auth_limiter = _SlidingWindowLimiter(
     max_per_window=10,
     window_seconds=60,
@@ -57,8 +58,11 @@ def _enforce_auth_rate_limit(request: Request) -> None:
 
 class UserRegister(BaseModel):
     email: EmailStr
+    # Field-level limit is char-based; the validator below enforces the
+    # bcrypt *byte* limit, which is what actually matters.
     password: str = Field(..., min_length=8, max_length=72)
 
+    # FIX: Enforce 72 UTF-8 bytes to prevent silent truncation.
     @field_validator("password")
     @classmethod
     def _bcrypt_byte_limit(cls, v: str) -> str:
@@ -130,6 +134,7 @@ async def register(request: Request, body: UserRegister):
 
     raw_key = user_store.create_api_key(user.id, tier="free")
 
+    # Clear caches so the new key is recognized immediately.
     _resolve_usage_key.cache_clear()
     get_tier_and_limit.cache_clear()
     get_api_key_created_at.cache_clear()
@@ -237,6 +242,8 @@ async def create_new_key(
 
     return {"api_key": raw_key, "message": "Save this key. It will not be shown again."}
 
+
+# FIX: New endpoint to revoke keys so users aren't locked out if they lose one.
 @router.delete("/v1/auth/keys")
 async def revoke_all_keys(
     request: Request,

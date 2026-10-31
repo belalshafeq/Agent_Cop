@@ -33,7 +33,9 @@ def evaluate(
     if snapshot.step >= settings.max_steps:
         logger.warning(
             "step_limit_exceeded session_id=%s step=%d max=%d",
-            snapshot.session_id, snapshot.step, settings.max_steps,
+            snapshot.session_id,
+            snapshot.step,
+            settings.max_steps,
         )
         try:
             metrics.inc_trip("step_limit")
@@ -67,7 +69,7 @@ def evaluate(
             },
         )
 
-    # FIX 4: Build a temporary snapshot to test loops BEFORE committing the step.
+    # FIX (H4): Build a temporary snapshot to test loops BEFORE committing the step.
     # This ensures a tripped loop doesn't eat up the user's step budget.
     new_hashes = snapshot.hashes + [payload_hash]
     temp_snapshot = SessionSnapshot(
@@ -83,7 +85,9 @@ def evaluate(
     if repeats >= settings.max_repeated_hashes:
         logger.warning(
             "repeated_payload_loop session_id=%s step=%d repeats=%d",
-            temp_snapshot.session_id, temp_snapshot.step, repeats,
+            temp_snapshot.session_id,
+            temp_snapshot.step,
+            repeats,
         )
         try:
             metrics.inc_trip("repeated_payload")
@@ -125,7 +129,10 @@ def evaluate(
         if repeats >= settings.max_cycle_repeats:
             logger.warning(
                 "cyclic_payload_loop session_id=%s step=%d cycle_len=%d repeats=%d",
-                temp_snapshot.session_id, temp_snapshot.step, cycle_len, repeats,
+                temp_snapshot.session_id,
+                temp_snapshot.step,
+                cycle_len,
+                repeats,
             )
             try:
                 metrics.inc_trip("cyclic_payload")

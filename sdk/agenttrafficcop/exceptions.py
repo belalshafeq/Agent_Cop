@@ -85,8 +85,16 @@ class SchemaRejected(AgentTrafficCopError):
     """
 
 
+class TierLimitExceeded(AgentTrafficCopError):
+    """The API key exceeded its monthly message limit (429)."""
+
+
+class AgentLimitExceeded(AgentTrafficCopError):
+    """The API key exceeded its unique-agent limit (402)."""
+
+
 # ---------------------------------------------------------------------------
-# Transport / auth errors (server returned 401 or the request failed)
+# Transport / auth errors (server returned 401/403 or the request failed)
 # ---------------------------------------------------------------------------
 
 
@@ -97,6 +105,13 @@ class AuthError(AgentTrafficCopError):
         * No key configured on the server (fail-closed).
         * Wrong key sent by the client.
         * Malformed Authorization header.
+    """
+
+
+class AdminRequired(AgentTrafficCopError):
+    """The endpoint requires an admin API key (403).
+
+    Raised when calling admin endpoints with a non-admin key.
     """
 
 
@@ -120,11 +135,13 @@ _ERROR_CODE_MAP = {
     "STEP_LIMIT_EXCEEDED": StepLimitExceeded,
     "SCHEMA_VALIDATION_FAILED": SchemaRejected,
     "CIRCUIT_BREAKER_TRIPPED": LoopDetected,  # fallback for base breaker
+    "TIER_LIMIT_EXCEEDED": TierLimitExceeded,
+    "AGENT_LIMIT_EXCEEDED": AgentLimitExceeded,
 }
 
 
 def exception_from_response(body: Dict[str, Any]) -> AgentTrafficCopError:
-    """Build the right SDK exception from a 422 response body.
+    """Build the right SDK exception from a 422/429/402 response body.
 
     Falls back to the base class for unknown error codes so the SDK
     never crashes on a server that adds new codes.

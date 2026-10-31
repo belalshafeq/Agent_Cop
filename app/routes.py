@@ -44,10 +44,9 @@ logger = logging.getLogger("agenttrafficcop.routes")
 router = APIRouter()
 
 
-# FIX (M1): admin authorization helper.
+# FIX: Admin authorization helper.
 # If ATC_ADMIN_API_KEYS is set, only those keys can hit admin endpoints.
-# If empty, we fall back to requiring the `team` tier (with the startup
-# warning emitted in config.py) so existing deployments don't break.
+# If empty, we fall back to requiring the `team` tier.
 def _require_admin(key_fingerprint: str) -> None:
     admin_fps = {_fingerprint(k) for k in settings.admin_api_keys}
     if admin_fps:
@@ -60,25 +59,18 @@ def _require_admin(key_fingerprint: str) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "error": "ADMIN_REQUIRED",
-                    "message": (
-                        "This endpoint requires an admin API key. "
-                        "Configure one via ATC_ADMIN_API_KEYS."
-                    ),
+                    "message": "This endpoint requires an admin API key.",
                 },
             )
         return
 
-    # Fallback: allow team-tier keys.
     tier, _ = get_tier_and_limit(key_fingerprint)
     if tier != "team":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "error": "ADMIN_REQUIRED",
-                "message": (
-                    "This endpoint requires an admin-tier key. "
-                    "Configure ATC_ADMIN_API_KEYS or use a team-tier key."
-                ),
+                "message": "This endpoint requires an admin-tier key.",
             },
         )
 
@@ -157,16 +149,7 @@ async def route_message(
     elapsed_ms = (time.perf_counter() - started) * 1000.0
 
     # 4. Agent limit — atomic check-and-add.
-    # FIX (C8): the original did read → check → record, which had a TOCTOU
-    # race. Two concurrent requests with new agents could both pass the
-    # check and both record, blowing past the tier limit. Now the backend
-    # does the check+add in one atomic operation.
-    #
-    # NOTE on ordering: this runs AFTER the breaker. If the breaker trips,
-    # the step is consumed but agents are not recorded — consistent with
-    # the "rejected messages don't count" rule. If the agent check rejects,
-    # the step IS consumed (rare edge case where a user hits both limits
-    # at once). Acceptable trade-off.
+    # FIX: Prevents TOCTOU race where concurrent requests bypass the limit.
     agent_limit = settings.agent_limit_for_tier(tier)
     requested_agents = {message.sender, message.recipient}
     allowed, newly_added = check_and_add_agents_atomic(

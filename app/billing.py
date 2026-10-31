@@ -20,6 +20,8 @@ logger = logging.getLogger("agenttrafficcop.billing")
 router = APIRouter()
 
 
+# FIX (C9): recognized events → target tier. Unknown events are acked,
+# not silently dropped.
 _TIER_FOR_EVENT = {
     "subscription_created":   "pro",
     "subscription_resumed":   "pro",
@@ -39,7 +41,7 @@ async def get_checkout_url(current_user: Annotated[User, Depends(get_current_use
     base_url = settings.lemonsqueezy_checkout_url
     separator = "&" if "?" in base_url else "?"
     
-    # FIX 2: Append the success URL so the user is redirected back to the dashboard
+    # FIX: Append the success URL so the user is redirected back to the dashboard
     # with a ?upgraded=true flag, which triggers an immediate dashboard refresh.
     success_url = "https://agenttrafficcop.com/dashboard.html?upgraded=true"
     
@@ -79,19 +81,36 @@ async def lemonsqueezy_webhook(
 
     new_tier = _TIER_FOR_EVENT.get(event_name)
     if new_tier is None:
+        logger.info("lemonsqueezy_webhook_ignored event=%s", event_name)
         return {"status": "ignored", "event": event_name}
 
+    # FIX (C9): safe .get chain + STRICT 500 on missing user_id.
+    # Returning 200 hides the failure — the customer pays and stays on
+    # free tier forever because nobody notices. 500 forces Lemon Squeezy
+    # to retry AND makes the failure visible in any log-based alerting.
     meta = data.get("meta") or {}
     custom = meta.get("custom_data") or {}
     raw_user_id = custom.get("user_id")
 
     if not raw_user_id:
-        logger.error("lemonsqueezy_webhook_missing_user_id event=%s", event_name)
-        raise HTTPException(status_code=500, detail="Webhook missing user_id")
+        logger.error(
+            "lemonsqueezy_webhook_missing_user_id event=%s — "
+            "verify checkout[custom][user_id] is configured in the "
+            "Lemon Squeezy dashboard",
+            event_name,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Webhook missing user_id — cannot process subscription event.",
+        )
 
     try:
         user_id = int(raw_user_id)
     except (TypeError, ValueError):
+        logger.error(
+            "lemonsqueezy_webhook_bad_user_id event=%s raw=%r",
+            event_name, raw_user_id,
+        )
         raise HTTPException(status_code=500, detail="Webhook user_id is not an integer.")
 
     with get_db() as conn:
@@ -123,7 +142,9 @@ async def lemonsqueezy_webhook(
                 
         conn.commit()
 
-    # Clear all caches so the new tier and key revocations take effect immediately
+    # FIX: clear the LRU cache. Without this, a customer who was already
+    # seen by get_tier_and_limit() stays cached on "free" until the
+    # process restarts.
     try:
         get_tier_and_limit.cache_clear()
         _resolve_usage_key.cache_clear()
@@ -131,5 +152,8 @@ async def lemonsqueezy_webhook(
     except Exception:
         pass
 
-    logger.info("user_tier_updated user_id=%s event=%s tier=%s", user_id, event_name, new_tier)
+    logger.info(
+        "user_tier_updated user_id=%s event=%s tier=%s",
+        user_id, event_name, new_tier,
+    )
     return {"status": "success", "event": event_name}
